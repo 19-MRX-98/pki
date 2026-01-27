@@ -23,6 +23,7 @@ from pki_certificates import (
     revoke_certificate,
     verify_key_matches_csr,
 )
+from pki_nginx import parse_domains, reload_nginx, validate_domains, write_nginx_files
 from pki_paths import CA_ROOT
 from pki_storage import (
     get_ca_dir,
@@ -31,6 +32,7 @@ from pki_storage import (
     get_revoked_marker,
     list_cas,
     list_crls,
+    list_upstream_suggestions,
     list_issued,
     prepare_storage,
     resolve_selected_ca,
@@ -281,7 +283,74 @@ def view_issued(ca_slug: str, slug: str):
         details=details,
         revoked_at=revoked_at,
         key_available=key_path is not None,
+        upstream_suggestions=list_upstream_suggestions(),
     )
+
+
+@app.route("/nginx/deploy/<ca_slug>/<slug>", methods=["POST"])
+def deploy_to_nginx(ca_slug: str, slug: str):
+    prepare_storage()
+    ca_dir = get_ca_dir(ca_slug)
+    if not ca_dir or not ca_exists(ca_dir):
+        flash("Keine CA vorhanden.", "error")
+        return redirect(url_for("view_issued", ca_slug=ca_slug, slug=slug))
+
+    cert_dir = get_cert_dir(ca_slug, slug)
+    if not cert_dir:
+        flash("Zertifikat nicht gefunden.", "error")
+        return redirect(url_for("certs_page", ca=ca_slug))
+
+    cert_path = next(cert_dir.glob("*.crt"), None)
+    key_path = next(cert_dir.glob("*.key"), None)
+    if not cert_path:
+        flash("Zertifikat nicht gefunden.", "error")
+        return redirect(url_for("certs_page", ca=ca_slug))
+    if not key_path:
+        flash("Private Key fehlt für die nginx-Integration.", "error")
+        return redirect(url_for("view_issued", ca_slug=ca_slug, slug=slug))
+
+    primary_domain = request.form.get("primary_domain", "").strip()
+    extra_domains = request.form.get("extra_domains", "").strip()
+    upstream_url = request.form.get("upstream_url", "").strip()
+    redirect_http = bool(request.form.get("redirect_http"))
+
+    if not primary_domain:
+        flash("Bitte eine Domain angeben.", "error")
+        return redirect(url_for("view_issued", ca_slug=ca_slug, slug=slug))
+    if not upstream_url or not upstream_url.startswith(("http://", "https://")) or " " in upstream_url:
+        flash("Ungültige Upstream-URL.", "error")
+        return redirect(url_for("view_issued", ca_slug=ca_slug, slug=slug))
+
+    domains = parse_domains(primary_domain, extra_domains)
+    valid_domains = validate_domains(domains)
+    if primary_domain not in valid_domains:
+        flash("Primäre Domain ist ungültig.", "error")
+        return redirect(url_for("view_issued", ca_slug=ca_slug, slug=slug))
+    if not valid_domains:
+        flash("Keine gültigen Domains gefunden.", "error")
+        return redirect(url_for("view_issued", ca_slug=ca_slug, slug=slug))
+
+    try:
+        cert_pem = cert_path.read_text(encoding="utf-8")
+        key_pem = key_path.read_text(encoding="utf-8")
+        ca_cert_path = ca_dir / "certs" / "ca.crt"
+        ca_pem = ca_cert_path.read_text(encoding="utf-8") if ca_cert_path.exists() else None
+        write_nginx_files(
+            primary_domain,
+            valid_domains,
+            upstream_url,
+            cert_pem,
+            key_pem,
+            ca_pem,
+            redirect_http,
+        )
+        reload_nginx()
+    except (OSError, RuntimeError) as exc:
+        flash(f"Nginx-Konfiguration konnte nicht geschrieben oder geladen werden: {exc}", "error")
+        return redirect(url_for("view_issued", ca_slug=ca_slug, slug=slug))
+
+    flash("Nginx-Konfiguration geschrieben und geladen.", "success")
+    return redirect(url_for("view_issued", ca_slug=ca_slug, slug=slug))
 
 
 @app.route("/ca", methods=["POST"])

@@ -1,0 +1,1 @@
+# Keep nginx folders in git. Certificates and generated vhosts are ignored.

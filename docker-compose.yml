@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  pki-app:
+    build: .
+    container_name: pki-app
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_SECRET_KEY: "bitte-aendern"
+      NGINX_SITES_DIR: /etc/nginx/sites-enabled
+      NGINX_CERTS_DIR: /etc/nginx/certs
+      NGINX_RELOAD_CONTAINER: pki-reverseproxy
+    volumes:
+      - ./data:/app/data
+      - ./nginx/sites-enabled:/etc/nginx/sites-enabled
+      - ./nginx/certs:/etc/nginx/certs
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - pki-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 5000), 2); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  pki-reverseproxy:
+    image: nginx:alpine
+    container_name: pki-reverseproxy
+    ports:
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/sites-enabled:/etc/nginx/sites-enabled
+      - ./nginx/certs:/etc/nginx/certs
+    networks:
+      - pki-net
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  pki-net:
+    driver: bridge

@@ -9,3 +9,6 @@ __pycache__/
 data/ca/
 data/issued/
 data/pki.db
+
+nginx/certs/
+nginx/sites-enabled/

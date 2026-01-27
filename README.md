@@ -39,6 +39,36 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 - Optional kann der passende Private Key hochgeladen werden, um ihn zentral abzulegen.
 - CSR und Private Key werden vor dem Signieren auf Übereinstimmung geprüft.
 
+## Nginx Integration (Reverse Proxy)
+
+- Auf der Zertifikats-Detailseite kann eine Nginx-Konfiguration erzeugt werden.
+- Standardpfade:
+  - vHosts: `/etc/nginx/sites-enabled`
+  - Zertifikate: `/etc/nginx/certs`
+- Konfiguration per ENV anpassbar:
+  - `NGINX_SITES_DIR`
+  - `NGINX_CERTS_DIR`
+- Automatischer Reload:
+  - Standard: `nginx -s reload`
+  - Wenn nginx in einem eigenen Container läuft:
+    - `NGINX_RELOAD_CONTAINER=pki-reverseproxy`
+    - Docker Socket mounten: `/var/run/docker.sock`
+  - Falls keine Docker-CLI im Container vorhanden ist, wird die Docker API über den Socket genutzt.
+  - Alternativ eigener Befehl: `NGINX_RELOAD_CMD="docker exec pki-reverseproxy nginx -s reload"`
+- Nach dem Schreiben wird `nginx -s reload` ausgeführt (App benötigt die Rechte).
+- Upstream-Vorschläge (optional):
+  - ENV: `NGINX_UPSTREAM_SUGGESTIONS` (CSV)
+  - Datei: `data/upstreams.txt` (Zeilen: `Label|URL` oder nur `URL`)
+
+### Hinweis zu Ports (Variante B)
+
+- Wenn auf dem Host Port 80 belegt ist, kann der Nginx-Container nur HTTPS nach außen exponieren:
+  - `8443:443`
+- Zugriff erfolgt dann über: `https://<host>:8443`
+- Für den ersten Zugriff auf die PKI-App ist im Compose zusätzlich `5000:5000` gemappt,
+  damit du Zertifikate erzeugen und die Nginx-Deploy-Funktion nutzen kannst.
+  Danach kannst du den Port optional wieder entfernen.
+
 ## Docker
 
 ```bash

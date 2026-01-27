@@ -162,6 +162,18 @@ label {
   font-size: 14px;
 }
 
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.checkbox input {
+  width: auto;
+}
+
 input {
   padding: 10px 12px;
   border-radius: 8px;

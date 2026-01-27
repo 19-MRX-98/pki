@@ -1,10 +1,11 @@
+import os
 import subprocess
 from pathlib import Path
 
 from werkzeug.utils import secure_filename
 
 from pki_ca import ca_crl_path, ca_exists
-from pki_paths import CA_ROOT, ISSUED_ROOT
+from pki_paths import CA_ROOT, DATA_DIR, ISSUED_ROOT
 from pki_utils import run_openssl_capture
 
 
@@ -205,3 +206,31 @@ def get_revoked_marker(cert_dir: Path) -> str | None:
     if revoked_marker.exists():
         return revoked_marker.read_text(encoding="utf-8").strip()
     return None
+
+
+def list_upstream_suggestions() -> list[dict[str, str]]:
+    suggestions: list[dict[str, str]] = []
+    env_values = os.environ.get("NGINX_UPSTREAM_SUGGESTIONS", "")
+    for raw in [value.strip() for value in env_values.split(",") if value.strip()]:
+        suggestions.append({"label": raw, "url": raw})
+
+    file_path = DATA_DIR / "upstreams.txt"
+    if file_path.exists():
+        for line in file_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "|" in line:
+                label, url = [part.strip() for part in line.split("|", 1)]
+            else:
+                label, url = line, line
+            suggestions.append({"label": label, "url": url})
+
+    seen = set()
+    unique = []
+    for item in suggestions:
+        if item["url"] in seen:
+            continue
+        seen.add(item["url"])
+        unique.append(item)
+    return unique

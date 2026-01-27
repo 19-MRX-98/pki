@@ -31,6 +31,46 @@
   </section>
 
   <section class="card">
+    <h2>Nginx Deployment</h2>
+    {% if key_available %}
+      <form method="post" action="{{ url_for('deploy_to_nginx', ca_slug=selected_ca, slug=slug) }}">
+        <label>
+          Domain (primär)
+          <input name="primary_domain" placeholder="example.com" required />
+        </label>
+        <label>
+          Weitere Domains (CSV, optional)
+          <input name="extra_domains" placeholder="www.example.com, *.example.com" />
+        </label>
+        <label>
+          Upstream URL
+          <input
+            name="upstream_url"
+            placeholder="http://service:8080"
+            list="upstream-suggestions"
+            required
+          />
+        </label>
+        {% if upstream_suggestions %}
+          <datalist id="upstream-suggestions">
+            {% for item in upstream_suggestions %}
+              <option value="{{ item.url }}">{{ item.label }}</option>
+            {% endfor %}
+          </datalist>
+        {% endif %}
+        <label class="checkbox">
+          <input type="checkbox" name="redirect_http" checked />
+          HTTP → HTTPS umleiten
+        </label>
+        <button type="submit">Nginx konfigurieren</button>
+      </form>
+      <p class="muted">Pfad: /etc/nginx/sites-enabled und /etc/nginx/certs (konfigurierbar per ENV).</p>
+    {% else %}
+      <p class="muted">Private Key fehlt – Deployment nicht möglich.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
     <h2>Rohdaten (PEM)</h2>
     <pre class="code-block">{{ raw_cert }}</pre>
   </section>
