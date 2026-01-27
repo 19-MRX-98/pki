@@ -1,0 +1,11 @@
+__pycache__/
+.venv/
+.git/
+.gitignore
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+data/ca/
+data/issued/
