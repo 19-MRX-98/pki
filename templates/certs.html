@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <h1>Zertifikate</h1>
+      <p class="muted">Zertifikate erstellen, zurückziehen oder löschen.</p>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Zertifikat erstellen</h2>
+    <form method="post" action="{{ url_for('create_cert_route') }}">
+      <label>
+        CA auswählen
+        <select name="ca_slug" required>
+          {% if cas %}
+            {% for ca in cas %}
+              <option value="{{ ca.slug }}" {% if ca.slug == selected_ca %}selected{% endif %}>
+                {{ ca.name }} ({{ ca.slug }})
+              </option>
+            {% endfor %}
+          {% else %}
+            <option value="" selected>Keine CA vorhanden</option>
+          {% endif %}
+        </select>
+      </label>
+      <label>
+        Zertifikatstyp
+        <select name="cert_type" id="cert-type" required>
+          <option value="server" selected>Serverzertifikat</option>
+          <option value="client">Clientzertifikat</option>
+        </select>
+      </label>
+      <label>
+        Common Name
+        <input name="common_name" required />
+      </label>
+      <label>
+        Organisation (optional)
+        <input name="organization" />
+      </label>
+      <label>
+        Land (optional, ISO-2)
+        <input name="country" maxlength="2" />
+      </label>
+      <label>
+        Hostnames (CSV, optional)
+        <input name="hostnames" placeholder="example.com, api.example.com" />
+      </label>
+      <label>
+        IP-Adressen (CSV, optional)
+        <input name="ip_addresses" placeholder="10.0.0.1, 10.0.0.2" />
+      </label>
+      <label>
+        Gültigkeit
+        <select name="validity_days">
+          <option value="90">3 Monate</option>
+          <option value="365" selected>12 Monate</option>
+          <option value="730">24 Monate</option>
+        </select>
+      </label>
+      <button type="submit">Zertifikat erstellen</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>CSR importieren</h2>
+    <form method="post" action="{{ url_for('import_csr_route') }}" enctype="multipart/form-data">
+      <label>
+        CA auswählen
+        <select name="ca_slug" required>
+          {% if cas %}
+            {% for ca in cas %}
+              <option value="{{ ca.slug }}" {% if ca.slug == selected_ca %}selected{% endif %}>
+                {{ ca.name }} ({{ ca.slug }})
+              </option>
+            {% endfor %}
+          {% else %}
+            <option value="" selected>Keine CA vorhanden</option>
+          {% endif %}
+        </select>
+      </label>
+      <label>
+        CSR-Datei (PEM)
+        <input name="csr_file" type="file" accept=".csr,.pem,.txt" required />
+      </label>
+      <label>
+        Private Key (optional, PEM)
+        <input name="key_file" type="file" accept=".key,.pem,.txt" />
+      </label>
+      <label>
+        Gültigkeit
+        <select name="validity_days">
+          <option value="90">3 Monate</option>
+          <option value="365" selected>12 Monate</option>
+          <option value="730">24 Monate</option>
+        </select>
+      </label>
+      <button type="submit">CSR signieren</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Vorhandene Zertifikate</h2>
+    {% if issued and selected_ca %}
+      <ul class="issued-list">
+        {% for item in issued %}
+          <li>
+            <div class="issued-meta">
+              <span>{{ item.slug }}</span>
+              {% if item.revoked %}
+                <span class="status revoked">Zurückgezogen</span>
+              {% else %}
+                <span class="status ok">Aktiv</span>
+              {% endif %}
+            </div>
+            <div class="inline-actions">
+              <a class="button-secondary" href="{{ url_for('view_issued', ca_slug=selected_ca, slug=item.slug) }}">
+                Ansehen
+              </a>
+              <a
+                class="button-secondary"
+                href="{{ url_for('download_issued', ca_slug=selected_ca, slug=item.slug, filetype='cert') }}"
+              >
+                Zertifikat
+              </a>
+              {% if item.key %}
+                <a
+                  class="button-secondary"
+                  href="{{ url_for('download_issued', ca_slug=selected_ca, slug=item.slug, filetype='key') }}"
+                >
+                  Private Key
+                </a>
+              {% else %}
+                <span class="status warn">Kein Key</span>
+              {% endif %}
+              {% if not item.revoked %}
+                <form
+                  class="inline-form"
+                  method="post"
+                  action="{{ url_for('revoke_issued', ca_slug=selected_ca, slug=item.slug) }}"
+                >
+                  <button class="button-warning" type="submit">Zurückziehen</button>
+                </form>
+              {% endif %}
+              <form
+                class="inline-form"
+                method="post"
+                action="{{ url_for('delete_issued', ca_slug=selected_ca, slug=item.slug) }}"
+              >
+                <button class="button-danger" type="submit">Löschen</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      {% if not cas %}
+        <p class="muted">Bitte zuerst eine CA erstellen.</p>
+      {% else %}
+        <p class="muted">Noch keine Zertifikate für diese CA erstellt.</p>
+      {% endif %}
+    {% endif %}
+  </section>
+{% endblock %}

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <h1>Benutzerverwaltung</h1>
+      <p class="muted">Benutzer anlegen und Passwörter verwalten.</p>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Eigenes Passwort ändern</h2>
+    <form method="post" action="{{ url_for('change_password_route') }}">
+      <label>
+        Aktuelles Passwort
+        <input name="current_password" type="password" required />
+      </label>
+      <label>
+        Neues Passwort
+        <input name="new_password" type="password" required />
+      </label>
+      <button type="submit">Passwort ändern</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Neuen Benutzer anlegen</h2>
+    <form method="post" action="{{ url_for('create_user_route') }}">
+      <label>
+        Benutzername
+        <input name="username" required />
+      </label>
+      <label>
+        Passwort
+        <input name="password" type="password" required />
+      </label>
+      <button type="submit">Benutzer erstellen</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Benutzer</h2>
+    {% if users %}
+      <div class="table">
+        <div class="table-row table-head">
+          <div>Benutzer</div>
+          <div>Erstellt</div>
+          <div>Aktionen</div>
+        </div>
+        {% for user in users %}
+          <div class="table-row">
+            <div>{{ user.username }}</div>
+            <div>{{ user.created_at }}</div>
+            <div class="inline-actions">
+              <form class="inline-form" method="post" action="{{ url_for('reset_password_route', user_id=user.id) }}">
+                <input name="new_password" type="password" placeholder="Neues Passwort" required />
+                <button class="button-secondary" type="submit">Passwort setzen</button>
+              </form>
+              {% if user.username != current_user %}
+                <form class="inline-form" method="post" action="{{ url_for('delete_user_route', user_id=user.id) }}">
+                  <button class="button-danger" type="submit">Löschen</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Keine Benutzer vorhanden.</p>
+    {% endif %}
+  </section>
+{% endblock %}

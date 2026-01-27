@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <h1>Startseite</h1>
+      <p class="muted">Überblick über CAs und ausgestellte Zertifikate.</p>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Überblick</h2>
+    <div class="stat-grid">
+      <div class="stat">
+        <span class="stat-label">CAs</span>
+        <span class="stat-value">{{ ca_count }}</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Zertifikate (aktive CA)</span>
+        <span class="stat-value">{{ issued_count }}</span>
+      </div>
+      {% if selected_ca %}
+        <div class="stat">
+          <span class="stat-label">Aktive CA</span>
+          <span class="stat-value">{{ selected_ca_name }}</span>
+          <span class="stat-sub muted">{{ selected_ca }}</span>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if not cas %}
+    <section class="card">
+      <h2>Erste Schritte</h2>
+      <p class="muted">Lege zuerst eine CA an, um Zertifikate ausstellen zu können.</p>
+      <div class="inline-actions">
+        <a class="button-secondary" href="{{ nav_links.cas_page }}">CA erstellen</a>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <h1>Sperrlisten (CRL)</h1>
+      <p class="muted">Übersicht über alle CAs und deren Sperrlisten.</p>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Alle Sperrlisten</h2>
+    {% if crls %}
+      <div class="table">
+        <div class="table-row table-head">
+          <div>CA</div>
+          <div>CRL</div>
+          <div>Last Update</div>
+          <div>Next Update</div>
+          <div>Aktionen</div>
+        </div>
+        {% for item in crls %}
+          <div class="table-row">
+            <div>
+              {{ item.name }} <span class="muted">({{ item.slug }})</span>
+            </div>
+            <div>
+              {% if item.crl_ready %}
+                <span class="status ok">Vorhanden</span>
+              {% else %}
+                <span class="status warn">Fehlt</span>
+              {% endif %}
+            </div>
+            <div>{{ item.last_update }}</div>
+            <div>{{ item.next_update }}</div>
+            <div class="inline-actions">
+              <form class="inline-form" method="post" action="{{ url_for('generate_crl_route', slug=item.slug) }}">
+                <button class="button-secondary" type="submit">CRL erzeugen</button>
+              </form>
+              {% if item.crl_ready %}
+                <a class="button-secondary" href="{{ url_for('download_crl', slug=item.slug) }}">Download</a>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Keine CAs vorhanden.</p>
+    {% endif %}
+  </section>
+{% endblock %}

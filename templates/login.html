@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Login - PKI Verwaltung</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <main class="login-page">
+      <div class="login-card">
+        <h1>PKI Verwaltung</h1>
+        <p class="muted">Bitte anmelden, um fortzufahren.</p>
+        {% if error %}
+          <div class="flash error">{{ error }}</div>
+        {% endif %}
+        <form method="post">
+          {% if next_param %}
+            <input type="hidden" name="next" value="{{ next_param }}" />
+          {% endif %}
+          <label>
+            Benutzername
+            <input name="username" autocomplete="username" required />
+          </label>
+          <label>
+            Passwort
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit">Anmelden</button>
+        </form>
+        <p class="muted login-hint">Standard: admin / admin</p>
+      </div>
+    </main>
+  </body>
+</html>

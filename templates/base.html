@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PKI Verwaltung</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <span>PKI Verwaltung</span>
+          <span class="brand-sub">Mehrere CAs verwalten</span>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-title">Aktive CA</div>
+          {% if cas %}
+            <form class="sidebar-form" method="get" action="{{ url_for(active_page) }}">
+              <select name="ca" onchange="this.form.submit()">
+                {% for ca in cas %}
+                  <option value="{{ ca.slug }}" {% if ca.slug == selected_ca %}selected{% endif %}>
+                    {{ ca.name }} ({{ ca.slug }})
+                  </option>
+                {% endfor %}
+              </select>
+            </form>
+          {% else %}
+            <div class="sidebar-meta muted">Keine CA vorhanden</div>
+          {% endif %}
+        </div>
+        <nav class="menu">
+          <a class="{% if active_page == 'home' %}active{% endif %}" href="{{ nav_links.home }}">
+            Startseite
+          </a>
+          <a class="{% if active_page == 'cas_page' %}active{% endif %}" href="{{ nav_links.cas_page }}">
+            CAs
+          </a>
+          <a class="{% if active_page == 'certs_page' %}active{% endif %}" href="{{ nav_links.certs_page }}">
+            Zertifikate
+          </a>
+          <a class="{% if active_page == 'crl_page' %}active{% endif %}" href="{{ nav_links.crl_page }}">
+            Sperrlisten
+          </a>
+          <a class="{% if active_page == 'users_page' %}active{% endif %}" href="{{ nav_links.users_page }}">
+            Benutzer
+          </a>
+        </nav>
+        <div class="sidebar-footer">
+          <label class="toggle">
+            <input id="theme-toggle" type="checkbox" />
+            <span class="toggle-track">
+              <span class="toggle-thumb"></span>
+            </span>
+            <span>Darkmode</span>
+          </label>
+          {% if current_user %}
+            <div class="sidebar-user">Angemeldet als {{ current_user }}</div>
+            <form class="sidebar-logout" method="post" action="{{ url_for('logout') }}">
+              <button class="button-secondary" type="submit">Logout</button>
+            </form>
+          {% endif %}
+        </div>
+      </aside>
+      <main class="content">
+        <div class="container">
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              <ul class="flash-list">
+                {% for category, message in messages %}
+                  <li class="flash {{ category }}">{{ message }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          {% endwith %}
+          {% block content %}{% endblock %}
+        </div>
+      </main>
+    </div>
+    <script>
+      (function () {
+        const storageKey = "pki-theme";
+        const root = document.documentElement;
+        const toggle = document.getElementById("theme-toggle");
+        const setTheme = (theme) => {
+          root.dataset.theme = theme;
+          if (toggle) {
+            toggle.checked = theme === "dark";
+          }
+          try {
+            localStorage.setItem(storageKey, theme);
+          } catch (err) {
+            // ignore storage errors
+          }
+        };
+        let stored = null;
+        try {
+          stored = localStorage.getItem(storageKey);
+        } catch (err) {
+          stored = null;
+        }
+        const prefersDark =
+          window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        setTheme(stored || (prefersDark ? "dark" : "light"));
+        if (toggle) {
+          toggle.addEventListener("change", () => {
+            setTheme(toggle.checked ? "dark" : "light");
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

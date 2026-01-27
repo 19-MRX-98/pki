@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <h1>Zertifizierungsstellen</h1>
+      <p class="muted">CAs anlegen, herunterladen und verwalten.</p>
+    </div>
+  </header>
+
+  <section id="cas" class="card">
+    <h2>Neue CA anlegen</h2>
+    <form method="post" action="{{ url_for('create_ca_route') }}">
+      <label>
+        Common Name (z.B. "Meine interne CA")
+        <input name="ca_common_name" required />
+      </label>
+      <label>
+        Kurzname (optional, z.B. "internal-ca")
+        <input name="ca_slug" />
+      </label>
+      <label>
+        Gültigkeit in Tagen
+        <input name="ca_days_valid" type="number" value="3650" min="1" />
+      </label>
+      <button type="submit">CA erstellen</button>
+    </form>
+    <div class="inline-actions">
+      {% if cas %}
+        <span class="status ok">{{ cas | length }} CA(s) vorhanden</span>
+      {% else %}
+        <span class="status warn">Keine CA vorhanden</span>
+      {% endif %}
+    </div>
+    {% if cas %}
+      <ul class="ca-list">
+        {% for ca in cas %}
+          <li>
+            <div class="issued-meta">
+              <span>{{ ca.name }} <span class="muted">({{ ca.slug }})</span></span>
+              {% if ca.slug == selected_ca %}
+                <span class="status ok">Aktiv</span>
+              {% endif %}
+            </div>
+            <div class="inline-actions">
+              <a class="button-secondary" href="{{ url_for('certs_page', ca=ca.slug) }}">
+                Zertifikate anzeigen
+              </a>
+              <form class="inline-form" method="post" action="{{ url_for('generate_crl_route', slug=ca.slug) }}">
+                <button class="button-secondary" type="submit">CRL erzeugen</button>
+              </form>
+              <a class="button-secondary" href="{{ url_for('download_ca', slug=ca.slug) }}">
+                CA-Zertifikat
+              </a>
+              {% if ca.crl_ready %}
+                <a class="button-secondary" href="{{ url_for('download_crl', slug=ca.slug) }}">
+                  CRL
+                </a>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+{% endblock %}

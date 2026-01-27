@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <h1>Zertifikat ansehen</h1>
+      <p class="muted">{{ slug }}</p>
+    </div>
+    <div class="inline-actions">
+      <a class="button-secondary" href="{{ url_for('certs_page', ca=selected_ca) }}">Zurück</a>
+      <a class="button-secondary" href="{{ url_for('download_issued', ca_slug=selected_ca, slug=slug, filetype='cert') }}">
+        Zertifikat herunterladen
+      </a>
+      {% if key_available %}
+        <a class="button-secondary" href="{{ url_for('download_issued', ca_slug=selected_ca, slug=slug, filetype='key') }}">
+          Private Key
+        </a>
+      {% else %}
+        <span class="status warn">Kein Key</span>
+      {% endif %}
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Status</h2>
+    {% if revoked_at %}
+      <span class="status revoked">Zurückgezogen am {{ revoked_at }}</span>
+    {% else %}
+      <span class="status ok">Aktiv</span>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Rohdaten (PEM)</h2>
+    <pre class="code-block">{{ raw_cert }}</pre>
+  </section>
+
+  <section class="card">
+    <h2>Details (OpenSSL)</h2>
+    <pre class="code-block">{{ details }}</pre>
+  </section>
+{% endblock %}

@@ -1,0 +1,11 @@
+__pycache__/
+.venv/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+
+data/ca/
+data/issued/
+data/pki.db
