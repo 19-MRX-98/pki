@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  pki-app:
+    image: ghcr.io/19-mrx-98/pki:latest
+    environment:
+      FLASK_SECRET_KEY: "bitte-aendern"
+      NGINX_FEATURES: "1"
+      NGINX_SITES_DIR: /etc/nginx/sites-enabled
+      NGINX_CERTS_DIR: /etc/nginx/certs
+      NGINX_RELOAD_CONTAINER: pki-reverseproxy
+      NGINX_DEFAULTS_PATH: /app/data/nginx_defaults.json
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - pki-data:/app/data
+      - nginx-sites:/etc/nginx/sites-enabled
+      - nginx-certs:/etc/nginx/certs
+    networks:
+      - pki-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  pki-reverseproxy:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+    volumes:
+      - nginx-sites:/etc/nginx/sites-enabled
+      - nginx-certs:/etc/nginx/certs
+      - nginx-conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - pki-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+networks:
+  pki-net:
+    driver: overlay
+
+volumes:
+  pki-data:
+  nginx-sites:
+  nginx-certs:
+  nginx-conf:

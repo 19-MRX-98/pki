@@ -103,6 +103,17 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
   - Standalone: `docker compose --profile standalone up -d`
 - Optional per `.env`: `COMPOSE_PROFILES=proxy` oder `COMPOSE_PROFILES=standalone`,
   dann reicht `docker compose up -d`.
+- GHCR-Variante: `docker-compose.ghcr.yml` (zieht `ghcr.io/<owner>/<repo>:latest`)
+
+## Docker Swarm (Stack)
+
+- Datei: `docker-stack.yml` (nur PKI + Reverseproxy, keine Standalone)
+- Läuft nur auf Manager-Nodes (constraints)
+- Overlay-Netzwerk: `pki-net`
+- Deploy: `docker stack deploy -c docker-stack.yml pki`
+- Service-Erkennung erfolgt über Swarm-DNS im Overlay-Netz:
+  - Upstream in Nginx sollte `http://pki-app:5000` sein
+  - Funktioniert auf allen Nodes, solange beide Services im selben Overlay-Netz sind
 
 ## GitHub Actions
 

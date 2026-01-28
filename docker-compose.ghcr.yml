@@ -1,0 +1,71 @@
+version: "3.9"
+
+services:
+  pki-app:
+    image: ghcr.io/19-mrx-98/pki:latest
+    container_name: pki-app
+    profiles: ["proxy"]
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      NGINX_FEATURES: "1"
+      NGINX_SITES_DIR: /etc/nginx/sites-enabled
+      NGINX_CERTS_DIR: /etc/nginx/certs
+      NGINX_RELOAD_CONTAINER: pki-reverseproxy
+      NGINX_DEFAULTS_PATH: /app/data/nginx_defaults.json
+    volumes:
+      - ./data:/app/data
+      - ./nginx/sites-enabled:/etc/nginx/sites-enabled
+      - ./nginx/certs:/etc/nginx/certs
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - pki-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 5000), 2); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  pki-app-standalone:
+    image: ghcr.io/19-mrx-98/pki:latest
+    container_name: pki-app-standalone
+    profiles: ["standalone"]
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      NGINX_FEATURES: "0"
+    volumes:
+      - ./data:/app/data
+    networks:
+      - pki-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 5000), 2); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  pki-reverseproxy:
+    image: nginx:alpine
+    container_name: pki-reverseproxy
+    profiles: ["proxy"]
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/sites-enabled:/etc/nginx/sites-enabled
+      - ./nginx/certs:/etc/nginx/certs
+    networks:
+      - pki-net
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  pki-net:
+    driver: bridge
