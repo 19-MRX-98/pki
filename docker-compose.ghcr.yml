@@ -53,7 +53,6 @@ services:
     container_name: pki-reverseproxy
     profiles: ["proxy"]
     ports:
-      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/sites-enabled:/etc/nginx/sites-enabled

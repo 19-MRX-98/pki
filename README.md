@@ -114,6 +114,8 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 - Service-Erkennung erfolgt über Swarm-DNS im Overlay-Netz:
   - Upstream in Nginx sollte `http://pki-app:5000` sein
   - Funktioniert auf allen Nodes, solange beide Services im selben Overlay-Netz sind
+- Swarm-Reload:
+  - `NGINX_RELOAD_SERVICE=pki-reverseproxy` (Service-Name, kein Container-Name)
 
 ## GitHub Actions
 

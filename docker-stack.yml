@@ -8,7 +8,7 @@ services:
       NGINX_FEATURES: "1"
       NGINX_SITES_DIR: /etc/nginx/sites-enabled
       NGINX_CERTS_DIR: /etc/nginx/certs
-      NGINX_RELOAD_CONTAINER: pki-reverseproxy
+      NGINX_RELOAD_SERVICE: pki-reverseproxy
       NGINX_DEFAULTS_PATH: /app/data/nginx_defaults.json
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

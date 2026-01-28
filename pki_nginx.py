@@ -10,6 +10,7 @@ from pathlib import Path
 NGINX_SITES_DIR = Path(os.environ.get("NGINX_SITES_DIR", "/etc/nginx/sites-enabled"))
 NGINX_CERTS_DIR = Path(os.environ.get("NGINX_CERTS_DIR", "/etc/nginx/certs"))
 NGINX_RELOAD_CONTAINER = os.environ.get("NGINX_RELOAD_CONTAINER", "")
+NGINX_RELOAD_SERVICE = os.environ.get("NGINX_RELOAD_SERVICE", "")
 NGINX_RELOAD_CMD = os.environ.get("NGINX_RELOAD_CMD", "")
 DEFAULTS_PATH = Path(os.environ.get("NGINX_DEFAULTS_PATH", "/app/data/nginx_defaults.json"))
 
@@ -291,6 +292,24 @@ def _docker_exec(container: str, cmd: list[str]) -> None:
         raise RuntimeError(message)
 
 
+def _docker_find_container_by_service(service_name: str) -> str | None:
+    filters = json.dumps({"label": [f"com.docker.swarm.service.name={service_name}"]})
+    path = f"/containers/json?all=1&filters={filters}"
+    try:
+        status, body = _docker_http_request("GET", path, None)
+    except (OSError, socket.timeout):
+        return None
+    if status < 200 or status >= 300:
+        return None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not payload:
+        return None
+    return payload[0].get("Id")
+
+
 def list_local_containers() -> list[dict[str, str | list[dict[str, str]]]]:
     payload = None
     if shutil.which("curl"):
@@ -362,5 +381,11 @@ def reload_nginx() -> None:
             _run_command(["docker", "exec", NGINX_RELOAD_CONTAINER, "nginx", "-s", "reload"])
             return
         _docker_exec(NGINX_RELOAD_CONTAINER, ["nginx", "-s", "reload"])
+        return
+    if NGINX_RELOAD_SERVICE:
+        container_id = _docker_find_container_by_service(NGINX_RELOAD_SERVICE)
+        if not container_id:
+            raise RuntimeError(f"Kein Container für Service {NGINX_RELOAD_SERVICE} gefunden")
+        _docker_exec(container_id, ["nginx", "-s", "reload"])
         return
     _run_command(["nginx", "-s", "reload"])
