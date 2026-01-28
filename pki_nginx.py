@@ -304,10 +304,18 @@ def _docker_find_container_by_service(service_name: str) -> str | None:
     except json.JSONDecodeError:
         return None
     label_key = "com.docker.swarm.service.name"
+    service_name = service_name.strip()
     for item in payload:
         labels = item.get("Labels", {}) or {}
-        if labels.get(label_key) == service_name:
+        label_value = labels.get(label_key, "")
+        if label_value == service_name:
             return item.get("Id")
+        if label_value and label_value.endswith(f"_{service_name}"):
+            return item.get("Id")
+        names = [name.lstrip("/") for name in item.get("Names", []) if name]
+        for name in names:
+            if name == service_name or name.endswith(f".{service_name}") or service_name in name:
+                return item.get("Id")
     return None
 
 
