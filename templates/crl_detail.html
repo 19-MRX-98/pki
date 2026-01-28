@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <h1>Sperrliste Details</h1>
+      <p class="muted">{{ slug }}</p>
+    </div>
+    <div class="inline-actions">
+      <a class="button-secondary" href="{{ url_for('crl_page') }}">Zurück</a>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Zurückgezogene Zertifikate</h2>
+    {% if entries %}
+      <div class="table">
+        <div class="table-row table-head">
+          <div>Serial</div>
+          <div>Revocation Date</div>
+        </div>
+        {% for item in entries %}
+          <div class="table-row">
+            <div class="code-inline">{{ item.serial }}</div>
+            <div>{{ item.revoked_at }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Keine Einträge in der Sperrliste.</p>
+    {% endif %}
+  </section>
+{% endblock %}

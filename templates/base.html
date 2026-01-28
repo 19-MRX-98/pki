@@ -45,6 +45,11 @@
           <a class="{% if active_page == 'users_page' %}active{% endif %}" href="{{ nav_links.users_page }}">
             Benutzer
           </a>
+          {% if nginx_enabled %}
+            <a class="{% if active_page == 'nginx_page' %}active{% endif %}" href="{{ nav_links.nginx_page }}">
+              Reverseproxy
+            </a>
+          {% endif %}
         </nav>
         <div class="sidebar-footer">
           <label class="toggle">

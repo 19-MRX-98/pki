@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <h1>VHost bearbeiten</h1>
+      <p class="muted">{{ name }}</p>
+    </div>
+    <div class="inline-actions">
+      <a class="button-secondary" href="{{ url_for('nginx_page') }}">Zurück</a>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Konfiguration</h2>
+    <form method="post" action="{{ url_for('nginx_edit_route', name=name) }}">
+      <label>
+        Domains (CSV)
+        <input name="server_names" value="{{ vhost.server_names | join(', ') }}" required />
+      </label>
+      <label>
+        Upstream URL
+        <input
+          name="upstream_url"
+          value="{{ vhost.upstream_url }}"
+          placeholder="http://service:8080"
+          list="upstream-suggestions"
+          required
+        />
+      </label>
+      <label>
+        Zertifikat ersetzen (optional)
+        <select name="cert_choice">
+          <option value="">Nicht ändern</option>
+          {% for item in certificates %}
+            <option value="{{ item.label }}">{{ item.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" name="redirect_http" {% if vhost.redirect_http %}checked{% endif %} />
+        HTTP → HTTPS umleiten
+      </label>
+      <button type="submit">Speichern</button>
+    </form>
+    {% if upstream_suggestions %}
+      <datalist id="upstream-suggestions">
+        {% for item in upstream_suggestions %}
+          <option value="{{ item.url }}">{{ item.label }}</option>
+        {% endfor %}
+      </datalist>
+    {% endif %}
+  </section>
+{% endblock %}

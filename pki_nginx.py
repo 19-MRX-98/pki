@@ -1,16 +1,17 @@
+import json
 import os
 import re
 import shlex
 import shutil
 import socket
 import subprocess
-import json
 from pathlib import Path
 
 NGINX_SITES_DIR = Path(os.environ.get("NGINX_SITES_DIR", "/etc/nginx/sites-enabled"))
 NGINX_CERTS_DIR = Path(os.environ.get("NGINX_CERTS_DIR", "/etc/nginx/certs"))
 NGINX_RELOAD_CONTAINER = os.environ.get("NGINX_RELOAD_CONTAINER", "")
 NGINX_RELOAD_CMD = os.environ.get("NGINX_RELOAD_CMD", "")
+DEFAULTS_PATH = Path(os.environ.get("NGINX_DEFAULTS_PATH", "/app/data/nginx_defaults.json"))
 
 _DOMAIN_RE = re.compile(r"^(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
 
@@ -75,6 +76,38 @@ def build_vhost(
     return "\n".join(lines)
 
 
+def load_defaults() -> dict[str, str | bool]:
+    if DEFAULTS_PATH.exists():
+        try:
+            data = json.loads(DEFAULTS_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    else:
+        data = {}
+    return {
+        "upstream_url": str(data.get("upstream_url", "")),
+        "redirect_http": bool(data.get("redirect_http", True)),
+    }
+
+
+def save_defaults(upstream_url: str, redirect_http: bool) -> None:
+    DEFAULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"upstream_url": upstream_url, "redirect_http": redirect_http}
+    DEFAULTS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def write_cert_files(
+    cert_path: Path, key_path: Path, cert_pem: str, key_pem: str, ca_pem: str | None
+) -> None:
+    fullchain = cert_pem.strip()
+    if ca_pem:
+        fullchain = f"{fullchain}\n{ca_pem.strip()}\n"
+    else:
+        fullchain = f"{fullchain}\n"
+    cert_path.write_text(fullchain, encoding="utf-8")
+    key_path.write_text(key_pem.strip() + "\n", encoding="utf-8")
+
+
 def write_nginx_files(
     primary_domain: str,
     server_names: list[str],
@@ -90,13 +123,7 @@ def write_nginx_files(
 
     cert_path = NGINX_CERTS_DIR / f"{domain_slug}.crt"
     key_path = NGINX_CERTS_DIR / f"{domain_slug}.key"
-    fullchain = cert_pem.strip()
-    if ca_pem:
-        fullchain = f"{fullchain}\n{ca_pem.strip()}\n"
-    else:
-        fullchain = f"{fullchain}\n"
-    cert_path.write_text(fullchain, encoding="utf-8")
-    key_path.write_text(key_pem.strip() + "\n", encoding="utf-8")
+    write_cert_files(cert_path, key_path, cert_pem, key_pem, ca_pem)
 
     vhost_path = NGINX_SITES_DIR / f"{domain_slug}.conf"
     vhost_path.write_text(
@@ -105,6 +132,82 @@ def write_nginx_files(
     )
 
     return vhost_path, cert_path, key_path
+
+
+def write_vhost_only(
+    vhost_path: Path,
+    server_names: list[str],
+    upstream_url: str,
+    cert_path: Path,
+    key_path: Path,
+    redirect_http: bool,
+) -> None:
+    vhost_path.write_text(
+        build_vhost(server_names, upstream_url, cert_path, key_path, redirect_http),
+        encoding="utf-8",
+    )
+
+
+def parse_vhost(content: str) -> dict[str, str | list[str] | bool]:
+    server_names = re.findall(r"server_name\\s+([^;]+);", content, flags=re.IGNORECASE)
+    domains: list[str] = []
+    for entry in server_names:
+        domains.extend([item.strip() for item in entry.split() if item.strip()])
+    proxy_pass = re.findall(r"proxy_pass\\s+([^;]+);", content)
+    ssl_cert = re.findall(r"ssl_certificate\\s+([^;]+);", content)
+    ssl_key = re.findall(r"ssl_certificate_key\\s+([^;]+);", content)
+    redirect_http = "listen 80" in content and "return 301" in content
+    return {
+        "server_names": domains,
+        "upstream_url": proxy_pass[0] if proxy_pass else "",
+        "cert_path": ssl_cert[0] if ssl_cert else "",
+        "key_path": ssl_key[0] if ssl_key else "",
+        "redirect_http": redirect_http,
+    }
+
+
+def list_vhosts() -> list[dict[str, str | list[str] | bool]]:
+    if not NGINX_SITES_DIR.exists():
+        return []
+    items = []
+    for entry in sorted(NGINX_SITES_DIR.glob("*.conf")):
+        try:
+            content = entry.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        parsed = parse_vhost(content)
+        items.append(
+            {
+                "name": entry.name,
+                "path": str(entry),
+                "server_names": parsed["server_names"],
+                "upstream_url": parsed["upstream_url"],
+                "cert_path": parsed["cert_path"],
+                "key_path": parsed["key_path"],
+                "redirect_http": parsed["redirect_http"],
+            }
+        )
+    return items
+
+
+def get_vhost(name: str) -> tuple[Path, dict[str, str | list[str] | bool] | None]:
+    safe = Path(name).name
+    if not safe.endswith(".conf"):
+        safe = f"{safe}.conf"
+    vhost_path = NGINX_SITES_DIR / safe
+    if not vhost_path.exists():
+        return vhost_path, None
+    try:
+        content = vhost_path.read_text(encoding="utf-8")
+    except OSError:
+        return vhost_path, None
+    return vhost_path, parse_vhost(content)
+
+
+def delete_vhost(name: str) -> None:
+    vhost_path, _parsed = get_vhost(name)
+    if vhost_path.exists():
+        vhost_path.unlink()
 
 
 def _run_command(command: list[str]) -> None:
@@ -116,6 +219,7 @@ def _run_command(command: list[str]) -> None:
 
 def _docker_http_request(method: str, path: str, body: bytes | None) -> tuple[int, bytes]:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(1.5)
     sock.connect("/var/run/docker.sock")
     headers = [
         f"{method} {path} HTTP/1.1",
@@ -185,6 +289,68 @@ def _docker_exec(container: str, cmd: list[str]) -> None:
     if status < 200 or status >= 300:
         message = output.decode("utf-8", errors="replace").strip() or "Docker exec start failed"
         raise RuntimeError(message)
+
+
+def list_local_containers() -> list[dict[str, str | list[dict[str, str]]]]:
+    payload = None
+    if shutil.which("curl"):
+        try:
+            result = subprocess.run(
+                [
+                    "curl",
+                    "--silent",
+                    "--show-error",
+                    "--unix-socket",
+                    "/var/run/docker.sock",
+                    "http://localhost/containers/json?all=1",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if result.returncode == 0:
+                payload = json.loads(result.stdout)
+        except (subprocess.SubprocessError, json.JSONDecodeError):
+            payload = None
+    if payload is None:
+        try:
+            status, body = _docker_http_request("GET", "/containers/json?all=1", None)
+        except (OSError, socket.timeout):
+            return []
+        if status < 200 or status >= 300:
+            return []
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return []
+
+    containers = []
+    for item in payload:
+        names = [name.lstrip("/") for name in item.get("Names", []) if name]
+        name = names[0] if names else item.get("Id", "")[:12]
+        ports = item.get("Ports", [])
+        port_list = []
+        for port in ports:
+            private_port = str(port.get("PrivatePort", ""))
+            public_port = port.get("PublicPort")
+            port_list.append(
+                {
+                    "private": private_port,
+                    "public": str(public_port) if public_port else "",
+                    "type": str(port.get("Type", "")),
+                }
+            )
+        containers.append(
+            {
+                "name": name,
+                "image": item.get("Image", ""),
+                "state": item.get("State", ""),
+                "status": item.get("Status", ""),
+                "ports": port_list,
+            }
+        )
+    return containers
 
 
 def reload_nginx() -> None:

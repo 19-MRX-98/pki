@@ -34,6 +34,7 @@
             <div>{{ item.last_update }}</div>
             <div>{{ item.next_update }}</div>
             <div class="inline-actions">
+              <a class="button-secondary" href="{{ url_for('crl_detail_page', slug=item.slug) }}">Details</a>
               <form class="inline-form" method="post" action="{{ url_for('generate_crl_route', slug=item.slug) }}">
                 <button class="button-secondary" type="submit">CRL erzeugen</button>
               </form>

@@ -29,6 +29,36 @@ def get_crl_info(ca_dir: Path) -> dict[str, str]:
     return {"path": str(crl_path), "last_update": last_update, "next_update": next_update}
 
 
+def get_crl_entries(ca_dir: Path) -> list[dict[str, str]]:
+    crl_path = ca_crl_path(ca_dir)
+    if not crl_path.exists():
+        return []
+    try:
+        output = run_openssl_capture(["crl", "-in", str(crl_path), "-noout", "-text"])
+    except subprocess.CalledProcessError:
+        return []
+    entries: list[dict[str, str]] = []
+    in_revoked = False
+    current: dict[str, str] = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("Revoked Certificates:"):
+            in_revoked = True
+            continue
+        if not in_revoked:
+            continue
+        if line.startswith("Serial Number:"):
+            if current:
+                entries.append(current)
+            current = {"serial": line.split(":", 1)[1].strip()}
+        elif line.startswith("Revocation Date:"):
+            current["revoked_at"] = line.split(":", 1)[1].strip()
+        elif line.startswith("CRL extensions:"):
+            continue
+    if current:
+        entries.append(current)
+    return entries
+
 def list_crls() -> list[dict[str, str | bool]]:
     if not CA_ROOT.exists():
         return []
@@ -234,3 +264,29 @@ def list_upstream_suggestions() -> list[dict[str, str]]:
         seen.add(item["url"])
         unique.append(item)
     return unique
+
+
+def list_certificates_with_keys() -> list[dict[str, str]]:
+    if not ISSUED_ROOT.exists():
+        return []
+    results = []
+    for ca_dir in sorted(ISSUED_ROOT.iterdir()):
+        if not ca_dir.is_dir():
+            continue
+        for cert_dir in sorted(ca_dir.iterdir(), reverse=True):
+            if not cert_dir.is_dir():
+                continue
+            cert_path = next(cert_dir.glob("*.crt"), None)
+            key_path = next(cert_dir.glob("*.key"), None)
+            if not cert_path or not key_path:
+                continue
+            results.append(
+                {
+                    "ca_slug": ca_dir.name,
+                    "slug": cert_dir.name,
+                    "cert_path": str(cert_path),
+                    "key_path": str(key_path),
+                    "label": f"{ca_dir.name}/{cert_dir.name}",
+                }
+            )
+    return results

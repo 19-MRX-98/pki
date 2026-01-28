@@ -15,6 +15,16 @@ Die Web-App läuft dann unter `http://localhost:5000`.
 
 Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass der Hostname/IP der URL nicht im Zertifikat als SAN enthalten ist. In der Web-App werden CN sowie die angegebenen Hostnames/IPs als SAN gesetzt.
 
+## Features (Überblick)
+
+- Mehrere CAs mit eigenem Issued-Store
+- Zertifikate erstellen, anzeigen (PEM + Details) und herunterladen
+- CSR-Import inkl. optionalem Private-Key-Upload
+- Zertifikate zurückziehen (CRL) + CRL-Details anzeigen
+- Benutzerverwaltung (Login, User anlegen, Passwörter ändern)
+- Reverseproxy-Management (VHosts, Defaults, Containerliste)
+- Darkmode-Toggle
+
 ## Anmeldung
 
 - Standardlogin: `admin` / `admin`
@@ -39,6 +49,16 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 - Optional kann der passende Private Key hochgeladen werden, um ihn zentral abzulegen.
 - CSR und Private Key werden vor dem Signieren auf Übereinstimmung geprüft.
 
+## Zertifikate anzeigen
+
+- Zertifikate lassen sich im Browser mit Rohdaten (PEM) und OpenSSL-Details anzeigen.
+- Bei CSR-Importen wird kein Private Key angezeigt (falls keiner hochgeladen wurde).
+
+## Sperrlisten (CRL)
+
+- Für jede CA kann eine CRL erzeugt und heruntergeladen werden.
+- Detailansicht listet zurückgezogene Zertifikate (Serial + Revocation Date).
+
 ## Nginx Integration (Reverse Proxy)
 
 - Auf der Zertifikats-Detailseite kann eine Nginx-Konfiguration erzeugt werden.
@@ -59,6 +79,8 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 - Upstream-Vorschläge (optional):
   - ENV: `NGINX_UPSTREAM_SUGGESTIONS` (CSV)
   - Datei: `data/upstreams.txt` (Zeilen: `Label|URL` oder nur `URL`)
+- Im Menüpunkt **Reverseproxy** können Defaults gesetzt, VHosts erstellt und bestehende Einträge verwaltet werden.
+- Reverseproxy-Seite zeigt vorhandene Domains und lokale Container inkl. Upstream-Vorschlägen.
 
 ### Hinweis zu Ports (Variante B)
 
@@ -68,6 +90,46 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 - Für den ersten Zugriff auf die PKI-App ist im Compose zusätzlich `5000:5000` gemappt,
   damit du Zertifikate erzeugen und die Nginx-Deploy-Funktion nutzen kannst.
   Danach kannst du den Port optional wieder entfernen.
+
+## Docker Compose (Stack)
+
+- `docker-compose.yml` enthält Profile:
+  - `proxy`: PKI-App + Nginx Reverseproxy (Port 8443)
+  - `standalone`: nur PKI-App ohne Reverseproxy-Funktionen
+- Nginx nutzt `./nginx/nginx.conf` und `./nginx/sites-enabled`.
+- Zertifikate werden unter `./nginx/certs` abgelegt.
+- Starten:
+  - Proxy-Stack: `docker compose --profile proxy up -d`
+  - Standalone: `docker compose --profile standalone up -d`
+- Optional per `.env`: `COMPOSE_PROFILES=proxy` oder `COMPOSE_PROFILES=standalone`,
+  dann reicht `docker compose up -d`.
+
+## GitHub Actions
+
+- Workflow: `.github/workflows/docker-image.yml`
+- Baut und veröffentlicht Images nach GHCR (`ghcr.io/<owner>/<repo>`)
+
+## Troubleshooting
+
+**502 Bad Gateway (nginx)**
+- Upstream nicht erreichbar oder falsch.
+- Im VHost prüfen: `proxy_pass http://pki-app:5000;` (Service-Name statt IP).
+- Test im nginx-Container: `docker exec pki-reverseproxy wget -qO- http://pki-app:5000`
+
+**504 Gateway Time-out (nginx)**
+- Upstream antwortet nicht rechtzeitig oder Blockade beim Reload/Socket.
+- Prüfen, ob die App läuft und im gleichen Docker-Netz hängt.
+
+**Reverseproxy-Seite lädt nicht / Containerliste leer**
+- Docker Socket mounten: `/var/run/docker.sock:/var/run/docker.sock`
+- Rechte prüfen: `ls -l /var/run/docker.sock`
+- Falls Socket Gruppe z. B. `987`: in Compose `group_add: ["987"]`
+
+**Nginx-Deploy: Ungültige Upstream-URL**
+- Muss mit `http://` oder `https://` beginnen und keine Leerzeichen enthalten.
+
+**CRL-Fehler**
+- Falls `cannot lookup how long until the next CRL is issued`, CA-Config wurde erneuert: neu bauen/reloaden.
 
 ## Docker
 

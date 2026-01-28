@@ -6,6 +6,7 @@ import shutil
 import subprocess
 
 from flask import Flask, flash, redirect, render_template, request, send_file, session, url_for
+from pathlib import Path
 from werkzeug.utils import secure_filename
 
 from pki_auth import (
@@ -23,7 +24,20 @@ from pki_certificates import (
     revoke_certificate,
     verify_key_matches_csr,
 )
-from pki_nginx import parse_domains, reload_nginx, validate_domains, write_nginx_files
+from pki_nginx import (
+    delete_vhost,
+    get_vhost,
+    list_vhosts,
+    load_defaults,
+    list_local_containers,
+    parse_domains,
+    reload_nginx,
+    save_defaults,
+    validate_domains,
+    write_nginx_files,
+    write_vhost_only,
+    write_cert_files,
+)
 from pki_paths import CA_ROOT
 from pki_storage import (
     get_ca_dir,
@@ -32,6 +46,8 @@ from pki_storage import (
     get_revoked_marker,
     list_cas,
     list_crls,
+    list_certificates_with_keys,
+    get_crl_entries,
     list_upstream_suggestions,
     list_issued,
     prepare_storage,
@@ -41,6 +57,7 @@ from pki_utils import run_openssl_capture
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
+NGINX_FEATURES = os.environ.get("NGINX_FEATURES", "1") != "0"
 
 
 @app.before_request
@@ -56,7 +73,7 @@ def require_authentication():
 
 @app.context_processor
 def inject_user():
-    return {"current_user": session.get("username")}
+    return {"current_user": session.get("username"), "nginx_enabled": NGINX_FEATURES}
 
 
 def build_nav_links(selected_ca: str) -> dict[str, str]:
@@ -67,6 +84,7 @@ def build_nav_links(selected_ca: str) -> dict[str, str]:
             "certs_page": url_for("certs_page", ca=selected_ca),
             "crl_page": url_for("crl_page", ca=selected_ca),
             "users_page": url_for("users_page", ca=selected_ca),
+            "nginx_page": url_for("nginx_page", ca=selected_ca),
         }
     return {
         "home": url_for("home"),
@@ -74,6 +92,7 @@ def build_nav_links(selected_ca: str) -> dict[str, str]:
         "certs_page": url_for("certs_page"),
         "crl_page": url_for("crl_page"),
         "users_page": url_for("users_page"),
+        "nginx_page": url_for("nginx_page"),
     }
 
 
@@ -153,6 +172,204 @@ def certs_page() -> str:
     )
 
 
+@app.route("/nginx", methods=["GET"])
+def nginx_page() -> str:
+    if not NGINX_FEATURES:
+        return redirect(url_for("home"))
+    prepare_storage()
+    cas = list_cas()
+    selected_ca = resolve_selected_ca(cas, request.args.get("ca"))
+    nav_links = build_nav_links(selected_ca)
+    defaults = load_defaults()
+    vhosts = list_vhosts()
+    domains = []
+    for item in vhosts:
+        for domain in item.get("server_names", []):
+            domains.append(domain)
+    if not domains:
+        for item in vhosts:
+            name = str(item.get("name", ""))
+            if name.endswith(".conf"):
+                domains.append(name[:-5])
+    domains = sorted(set(domains))
+    containers = list_local_containers()
+    return render_template(
+        "nginx.html",
+        active_page="nginx_page",
+        nav_links=nav_links,
+        cas=cas,
+        selected_ca=selected_ca,
+        selected_ca_name=get_ca_name(cas, selected_ca) if selected_ca else "",
+        defaults=defaults,
+        vhosts=vhosts,
+        domains=domains,
+        certificates=list_certificates_with_keys(),
+        upstream_suggestions=list_upstream_suggestions(),
+        containers=containers,
+    )
+
+
+@app.route("/nginx/defaults", methods=["POST"])
+def nginx_defaults_route():
+    if not NGINX_FEATURES:
+        return redirect(url_for("home"))
+    upstream_url = request.form.get("upstream_url", "").strip()
+    redirect_http = bool(request.form.get("redirect_http"))
+    save_defaults(upstream_url, redirect_http)
+    flash("Defaults gespeichert.", "success")
+    return redirect(url_for("nginx_page"))
+
+
+@app.route("/nginx/create", methods=["POST"])
+def nginx_create_route():
+    if not NGINX_FEATURES:
+        return redirect(url_for("home"))
+    primary_domain = request.form.get("primary_domain", "").strip()
+    extra_domains = request.form.get("extra_domains", "").strip()
+    upstream_url = request.form.get("upstream_url", "").strip()
+    redirect_http = bool(request.form.get("redirect_http"))
+    cert_choice = request.form.get("cert_choice", "").strip()
+
+    if not primary_domain:
+        flash("Bitte eine Domain angeben.", "error")
+        return redirect(url_for("nginx_page"))
+    if not upstream_url or not upstream_url.startswith(("http://", "https://")) or " " in upstream_url:
+        flash("Ungültige Upstream-URL.", "error")
+        return redirect(url_for("nginx_page"))
+
+    domains = parse_domains(primary_domain, extra_domains)
+    valid_domains = validate_domains(domains)
+    if primary_domain not in valid_domains:
+        flash("Primäre Domain ist ungültig.", "error")
+        return redirect(url_for("nginx_page"))
+    if not valid_domains:
+        flash("Keine gültigen Domains gefunden.", "error")
+        return redirect(url_for("nginx_page"))
+
+    cert_map = {item["label"]: item for item in list_certificates_with_keys()}
+    cert_entry = cert_map.get(cert_choice)
+    if not cert_entry:
+        flash("Bitte ein Zertifikat auswählen.", "error")
+        return redirect(url_for("nginx_page"))
+
+    try:
+        cert_pem = Path(cert_entry["cert_path"]).read_text(encoding="utf-8")
+        key_pem = Path(cert_entry["key_path"]).read_text(encoding="utf-8")
+        ca_slug = cert_entry["ca_slug"]
+        ca_dir = get_ca_dir(ca_slug)
+        ca_pem = None
+        if ca_dir:
+            ca_cert_path = ca_dir / "certs" / "ca.crt"
+            if ca_cert_path.exists():
+                ca_pem = ca_cert_path.read_text(encoding="utf-8")
+        write_nginx_files(
+            primary_domain,
+            valid_domains,
+            upstream_url,
+            cert_pem,
+            key_pem,
+            ca_pem,
+            redirect_http,
+        )
+        reload_nginx()
+    except (OSError, RuntimeError) as exc:
+        flash(f"Nginx-Konfiguration konnte nicht geschrieben oder geladen werden: {exc}", "error")
+        return redirect(url_for("nginx_page"))
+
+    flash("VHost erstellt und Nginx neu geladen.", "success")
+    return redirect(url_for("nginx_page"))
+
+
+@app.route("/nginx/edit/<name>", methods=["GET", "POST"])
+def nginx_edit_route(name: str):
+    if not NGINX_FEATURES:
+        return redirect(url_for("home"))
+    vhost_path, vhost = get_vhost(name)
+    if not vhost:
+        flash("VHost nicht gefunden.", "error")
+        return redirect(url_for("nginx_page"))
+
+    if request.method == "POST":
+        server_names = request.form.get("server_names", "").strip()
+        upstream_url = request.form.get("upstream_url", "").strip()
+        redirect_http = bool(request.form.get("redirect_http"))
+        cert_choice = request.form.get("cert_choice", "").strip()
+
+        if not server_names:
+            flash("Bitte Domains angeben.", "error")
+            return redirect(url_for("nginx_edit_route", name=name))
+        domains = [item.strip() for item in server_names.split(",") if item.strip()]
+        valid_domains = validate_domains(domains)
+        if not valid_domains:
+            flash("Keine gültigen Domains gefunden.", "error")
+            return redirect(url_for("nginx_edit_route", name=name))
+        if not upstream_url or not upstream_url.startswith(("http://", "https://")) or " " in upstream_url:
+            flash("Ungültige Upstream-URL.", "error")
+            return redirect(url_for("nginx_edit_route", name=name))
+
+        try:
+            if cert_choice:
+                cert_map = {item["label"]: item for item in list_certificates_with_keys()}
+                cert_entry = cert_map.get(cert_choice)
+                if not cert_entry:
+                    flash("Zertifikat nicht gefunden.", "error")
+                    return redirect(url_for("nginx_edit_route", name=name))
+                cert_pem = Path(cert_entry["cert_path"]).read_text(encoding="utf-8")
+                key_pem = Path(cert_entry["key_path"]).read_text(encoding="utf-8")
+                ca_slug = cert_entry["ca_slug"]
+                ca_dir = get_ca_dir(ca_slug)
+                ca_pem = None
+                if ca_dir:
+                    ca_cert_path = ca_dir / "certs" / "ca.crt"
+                    if ca_cert_path.exists():
+                        ca_pem = ca_cert_path.read_text(encoding="utf-8")
+                cert_path = Path(vhost.get("cert_path") or "")
+                key_path = Path(vhost.get("key_path") or "")
+                if cert_path and key_path:
+                    write_cert_files(cert_path, key_path, cert_pem, key_pem, ca_pem)
+
+            cert_path = Path(vhost.get("cert_path") or "")
+            key_path = Path(vhost.get("key_path") or "")
+            write_vhost_only(vhost_path, valid_domains, upstream_url, cert_path, key_path, redirect_http)
+            reload_nginx()
+        except (OSError, RuntimeError) as exc:
+            flash(f"Nginx-Konfiguration konnte nicht geschrieben oder geladen werden: {exc}", "error")
+            return redirect(url_for("nginx_edit_route", name=name))
+
+        flash("VHost aktualisiert.", "success")
+        return redirect(url_for("nginx_page"))
+
+    defaults = load_defaults()
+    cas = list_cas()
+    selected_ca = resolve_selected_ca(cas, request.args.get("ca"))
+    return render_template(
+        "nginx_edit.html",
+        active_page="nginx_page",
+        nav_links=build_nav_links(selected_ca),
+        cas=cas,
+        selected_ca=selected_ca,
+        selected_ca_name=get_ca_name(cas, selected_ca) if selected_ca else "",
+        vhost=vhost,
+        name=name,
+        defaults=defaults,
+        certificates=list_certificates_with_keys(),
+        upstream_suggestions=list_upstream_suggestions(),
+    )
+
+
+@app.route("/nginx/delete/<name>", methods=["POST"])
+def nginx_delete_route(name: str):
+    if not NGINX_FEATURES:
+        return redirect(url_for("home"))
+    try:
+        delete_vhost(name)
+        reload_nginx()
+    except (OSError, RuntimeError) as exc:
+        flash(f"VHost konnte nicht gelöscht werden: {exc}", "error")
+        return redirect(url_for("nginx_page"))
+    flash("VHost gelöscht.", "success")
+    return redirect(url_for("nginx_page"))
+
 @app.route("/crl", methods=["GET"])
 def crl_page() -> str:
     prepare_storage()
@@ -167,6 +384,29 @@ def crl_page() -> str:
         selected_ca=selected_ca,
         selected_ca_name=get_ca_name(cas, selected_ca) if selected_ca else "",
         crls=list_crls(),
+    )
+
+
+@app.route("/crl/<slug>", methods=["GET"])
+def crl_detail_page(slug: str) -> str:
+    prepare_storage()
+    cas = list_cas()
+    selected_ca = resolve_selected_ca(cas, slug)
+    nav_links = build_nav_links(selected_ca)
+    ca_dir = get_ca_dir(slug)
+    if not ca_dir:
+        flash("CA nicht gefunden.", "error")
+        return redirect(url_for("crl_page"))
+    entries = get_crl_entries(ca_dir)
+    return render_template(
+        "crl_detail.html",
+        active_page="crl_page",
+        nav_links=nav_links,
+        cas=cas,
+        selected_ca=selected_ca,
+        selected_ca_name=get_ca_name(cas, selected_ca) if selected_ca else "",
+        slug=slug,
+        entries=entries,
     )
 
 
