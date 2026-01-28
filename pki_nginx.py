@@ -293,16 +293,38 @@ def _docker_exec(container: str, cmd: list[str]) -> None:
 
 
 def _docker_find_container_by_service(service_name: str) -> str | None:
-    try:
-        status, body = _docker_http_request("GET", "/containers/json?all=1", None)
-    except (OSError, socket.timeout):
-        return None
-    if status < 200 or status >= 300:
-        return None
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except json.JSONDecodeError:
-        return None
+    payload = None
+    if shutil.which("curl"):
+        try:
+            result = subprocess.run(
+                [
+                    "curl",
+                    "--silent",
+                    "--show-error",
+                    "--unix-socket",
+                    "/var/run/docker.sock",
+                    "http://localhost/containers/json?all=1",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if result.returncode == 0:
+                payload = json.loads(result.stdout)
+        except (subprocess.SubprocessError, json.JSONDecodeError):
+            payload = None
+    if payload is None:
+        try:
+            status, body = _docker_http_request("GET", "/containers/json?all=1", None)
+        except (OSError, socket.timeout):
+            return None
+        if status < 200 or status >= 300:
+            return None
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return None
     label_key = "com.docker.swarm.service.name"
     service_name = service_name.strip()
     for item in payload:
