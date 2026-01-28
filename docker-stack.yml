@@ -22,6 +22,7 @@ services:
       placement:
         constraints:
           - node.role == manager
+          - node.labels.pki-leader == true
 
   pki-reverseproxy:
     image: nginx:alpine
@@ -38,6 +39,7 @@ services:
       placement:
         constraints:
           - node.role == manager
+          - node.labels.pki-leader == true
 
 networks:
   pki-net:

@@ -293,10 +293,8 @@ def _docker_exec(container: str, cmd: list[str]) -> None:
 
 
 def _docker_find_container_by_service(service_name: str) -> str | None:
-    filters = json.dumps({"label": [f"com.docker.swarm.service.name={service_name}"]})
-    path = f"/containers/json?all=1&filters={filters}"
     try:
-        status, body = _docker_http_request("GET", path, None)
+        status, body = _docker_http_request("GET", "/containers/json?all=1", None)
     except (OSError, socket.timeout):
         return None
     if status < 200 or status >= 300:
@@ -305,9 +303,12 @@ def _docker_find_container_by_service(service_name: str) -> str | None:
         payload = json.loads(body.decode("utf-8"))
     except json.JSONDecodeError:
         return None
-    if not payload:
-        return None
-    return payload[0].get("Id")
+    label_key = "com.docker.swarm.service.name"
+    for item in payload:
+        labels = item.get("Labels", {}) or {}
+        if labels.get(label_key) == service_name:
+            return item.get("Id")
+    return None
 
 
 def list_local_containers() -> list[dict[str, str | list[dict[str, str]]]]:
