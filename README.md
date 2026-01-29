@@ -119,6 +119,11 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
   - Funktioniert auf allen Nodes, solange beide Services im selben Overlay-Netz sind
 - Swarm-Reload:
   - `NGINX_RELOAD_SERVICE=pki-reverseproxy` (Service-Name, kein Container-Name)
+- Optionaler Agent (empfohlen für Multi-Node):
+  - Image: `ghcr.io/<owner>/<repo>-agent:latest`
+  - Service-Name: `nginx-reload-agent` (global)
+  - App-ENV: `NGINX_AGENT_URL=http://nginx-reload-agent:9000`
+  - Optionales Token: `NGINX_AGENT_TOKEN` + `AGENT_TOKEN`
 
 ## GitHub Actions
 

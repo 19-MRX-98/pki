@@ -5,6 +5,8 @@ import shlex
 import shutil
 import socket
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 NGINX_SITES_DIR = Path(os.environ.get("NGINX_SITES_DIR", "/etc/nginx/sites-enabled"))
@@ -12,6 +14,8 @@ NGINX_CERTS_DIR = Path(os.environ.get("NGINX_CERTS_DIR", "/etc/nginx/certs"))
 NGINX_RELOAD_CONTAINER = os.environ.get("NGINX_RELOAD_CONTAINER", "")
 NGINX_RELOAD_SERVICE = os.environ.get("NGINX_RELOAD_SERVICE", "")
 NGINX_RELOAD_CMD = os.environ.get("NGINX_RELOAD_CMD", "")
+NGINX_AGENT_URL = os.environ.get("NGINX_AGENT_URL", "")
+NGINX_AGENT_TOKEN = os.environ.get("NGINX_AGENT_TOKEN", "")
 DEFAULTS_PATH = Path(os.environ.get("NGINX_DEFAULTS_PATH", "/app/data/nginx_defaults.json"))
 
 _DOMAIN_RE = re.compile(r"^(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
@@ -186,6 +190,7 @@ def list_vhosts() -> list[dict[str, str | list[str] | bool]]:
                 "cert_path": parsed["cert_path"],
                 "key_path": parsed["key_path"],
                 "redirect_http": parsed["redirect_http"],
+                "raw_content": content,
             }
         )
     return items
@@ -342,6 +347,17 @@ def _docker_find_container_by_service(service_name: str) -> str | None:
 
 
 def list_local_containers() -> list[dict[str, str | list[dict[str, str]]]]:
+    if NGINX_AGENT_URL:
+        try:
+            req = urllib.request.Request(
+                f\"{NGINX_AGENT_URL.rstrip('/')}/containers\",
+                headers={\"X-Reload-Token\": NGINX_AGENT_TOKEN} if NGINX_AGENT_TOKEN else {},
+            )
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                data = json.loads(resp.read().decode(\"utf-8\"))
+            return data.get(\"containers\", [])
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+            pass
     payload = None
     if shutil.which("curl"):
         try:
@@ -404,6 +420,19 @@ def list_local_containers() -> list[dict[str, str | list[dict[str, str]]]]:
 
 
 def reload_nginx() -> None:
+    if NGINX_AGENT_URL:
+        try:
+            req = urllib.request.Request(
+                f\"{NGINX_AGENT_URL.rstrip('/')}/reload\",
+                method=\"POST\",
+                headers={\"X-Reload-Token\": NGINX_AGENT_TOKEN} if NGINX_AGENT_TOKEN else {},
+            )
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                if resp.status >= 300:
+                    raise RuntimeError(resp.read().decode(\"utf-8\").strip())
+            return
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise RuntimeError(str(exc))
     if NGINX_RELOAD_CMD:
         _run_command(shlex.split(NGINX_RELOAD_CMD))
         return

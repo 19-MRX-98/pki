@@ -76,11 +76,12 @@
   <section class="card">
     <h2>Vorhandene VHosts</h2>
     {% if vhosts %}
-      <div class="table">
+      <div class="table vhost-table">
         <div class="table-row table-head">
           <div>Name</div>
           <div>Domains</div>
           <div>Upstream</div>
+          <div>RAW</div>
           <div>Aktionen</div>
         </div>
         {% for item in vhosts %}
@@ -88,6 +89,12 @@
             <div>{{ item.name }}</div>
             <div>{{ item.server_names | join(", ") }}</div>
             <div>{{ item.upstream_url }}</div>
+            <div>
+              <details class="raw-details">
+                <summary class="button-secondary">Anzeigen</summary>
+                <div class="code-block">{{ item.raw_content | e }}</div>
+              </details>
+            </div>
             <div class="inline-actions">
               <a class="button-secondary" href="{{ url_for('nginx_edit_route', name=item.name) }}">Bearbeiten</a>
               <form class="inline-form" method="post" action="{{ url_for('nginx_delete_route', name=item.name) }}">
