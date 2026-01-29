@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  pki-app:
+    image: ghcr.io/19-mrx-98/pki:latest
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_SECRET_KEY: "bitte-aendern"
+      NGINX_FEATURES: "1"
+      NGINX_SITES_DIR: /etc/nginx/sites-enabled
+      NGINX_CERTS_DIR: /etc/nginx/certs
+      NGINX_RELOAD_SERVICE: pki-reverseproxy
+      NGINX_DEFAULTS_PATH: /app/data/nginx_defaults.json
+      NGINX_AGENT_URL: http://nginx-reload-agent:9000
+      NGINX_AGENT_TOKEN: change-me
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /mnt/gluster/swarm/pki_proxy/data:/app/data
+      - /mnt/gluster/swarm/pki_proxy/nginx/nginx-sites:/etc/nginx/sites-enabled
+      - /mnt/gluster/swarm/pki_proxy/nginx/nginx-certs:/etc/nginx/certs
+    networks:
+      - pki-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  pki-reverseproxy:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+    volumes:
+      - /mnt/gluster/swarm/pki_proxy/nginx/nginx-sites:/etc/nginx/sites-enabled
+      - /mnt/gluster/swarm/pki_proxy/nginx/nginx-certs:/etc/nginx/certs
+      - /mnt/gluster/swarm/pki_proxy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - pki-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  nginx-reload-agent:
+    image: ghcr.io/19-mrx-98/pki-agent:latest
+    environment:
+      AGENT_TOKEN: change-me
+      NGINX_RELOAD_SERVICE: pki-reverseproxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - pki-net
+    deploy:
+      mode: global
+
+networks:
+  pki-net:
+    driver: overlay
