@@ -347,19 +347,19 @@ def _docker_find_container_by_service(service_name: str) -> str | None:
 
 
 def list_local_containers() -> list[dict[str, str | list[dict[str, str]]]]:
+    payload = None
     if NGINX_AGENT_URL:
         try:
             req = urllib.request.Request(
-                f\"{NGINX_AGENT_URL.rstrip('/')}/containers\",
-                headers={\"X-Reload-Token\": NGINX_AGENT_TOKEN} if NGINX_AGENT_TOKEN else {},
+                f"{NGINX_AGENT_URL.rstrip('/')}/containers",
+                headers={"X-Reload-Token": NGINX_AGENT_TOKEN} if NGINX_AGENT_TOKEN else {},
             )
             with urllib.request.urlopen(req, timeout=2) as resp:
-                data = json.loads(resp.read().decode(\"utf-8\"))
-            return data.get(\"containers\", [])
+                data = json.loads(resp.read().decode("utf-8"))
+            payload = data.get("containers", [])
         except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
-            pass
-    payload = None
-    if shutil.which("curl"):
+            payload = None
+    if payload is None and shutil.which("curl"):
         try:
             result = subprocess.run(
                 [
@@ -394,7 +394,20 @@ def list_local_containers() -> list[dict[str, str | list[dict[str, str]]]]:
     containers = []
     for item in payload:
         names = [name.lstrip("/") for name in item.get("Names", []) if name]
-        name = names[0] if names else item.get("Id", "")[:12]
+        raw_name = names[0] if names else item.get("Id", "")[:12]
+        labels = item.get("Labels", {}) or {}
+        service_label = labels.get("com.docker.swarm.service.name", "")
+        derived_service = ""
+        if not service_label and ".1." in raw_name:
+            parts = raw_name.split(".")
+            if len(parts) >= 3 and parts[1].isdigit():
+                derived_service = parts[0]
+        service_name = service_label or derived_service or raw_name
+        display_name = (
+            f"{service_name} ({raw_name})"
+            if service_name and raw_name and service_name != raw_name
+            else service_name
+        )
         ports = item.get("Ports", [])
         port_list = []
         for port in ports:
@@ -409,7 +422,8 @@ def list_local_containers() -> list[dict[str, str | list[dict[str, str]]]]:
             )
         containers.append(
             {
-                "name": name,
+                "name": service_name,
+                "display_name": display_name,
                 "image": item.get("Image", ""),
                 "state": item.get("State", ""),
                 "status": item.get("Status", ""),
@@ -423,13 +437,13 @@ def reload_nginx() -> None:
     if NGINX_AGENT_URL:
         try:
             req = urllib.request.Request(
-                f\"{NGINX_AGENT_URL.rstrip('/')}/reload\",
-                method=\"POST\",
-                headers={\"X-Reload-Token\": NGINX_AGENT_TOKEN} if NGINX_AGENT_TOKEN else {},
+                f"{NGINX_AGENT_URL.rstrip('/')}/reload",
+                method="POST",
+                headers={"X-Reload-Token": NGINX_AGENT_TOKEN} if NGINX_AGENT_TOKEN else {},
             )
             with urllib.request.urlopen(req, timeout=2) as resp:
                 if resp.status >= 300:
-                    raise RuntimeError(resp.read().decode(\"utf-8\").strip())
+                    raise RuntimeError(resp.read().decode("utf-8").strip())
             return
         except (urllib.error.URLError, TimeoutError) as exc:
             raise RuntimeError(str(exc))

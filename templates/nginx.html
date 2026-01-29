@@ -86,7 +86,7 @@
         </div>
         {% for item in vhosts %}
           <div class="table-row">
-            <div>{{ item.name }}</div>
+            <div>{{ item.display_name or item.name }}</div>
             <div>{{ item.server_names | join(", ") }}</div>
             <div>{{ item.upstream_url }}</div>
             <div>

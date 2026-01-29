@@ -109,9 +109,6 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 
 - Datei: `docker-stack.yml` (nur PKI + Reverseproxy, keine Standalone)
 - Läuft nur auf Manager-Nodes (constraints)
-- Optional: Services auf Leader pinnen via Node-Label:
-  - `docker node update --label-add pki-leader=true <LEADER_NODE>`
-  - Constraint: `node.labels.pki-leader == true`
 - Overlay-Netzwerk: `pki-net`
 - Deploy: `docker stack deploy -c docker-stack.yml pki`
 - Service-Erkennung erfolgt über Swarm-DNS im Overlay-Netz:

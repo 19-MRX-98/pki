@@ -26,7 +26,6 @@ services:
       placement:
         constraints:
           - node.role == manager
-          - node.labels.pki-leader == true
 
   pki-reverseproxy:
     image: nginx:alpine
@@ -45,7 +44,6 @@ services:
       placement:
         constraints:
           - node.role == manager
-          - node.labels.pki-leader == true
 
   nginx-reload-agent:
     image: ghcr.io/19-mrx-98/pki-agent:latest
