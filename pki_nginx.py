@@ -433,6 +433,79 @@ def list_local_containers() -> list[dict[str, str | list[dict[str, str]]]]:
     return containers
 
 
+def list_swarm_services() -> list[dict[str, str | list[dict[str, str]]]]:
+    payload = None
+    try:
+        status, body = _docker_http_request("GET", "/services", None)
+    except (OSError, socket.timeout):
+        status = 0
+        body = b""
+    if status >= 200 and status < 300:
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            payload = None
+    if payload is None and NGINX_AGENT_URL:
+        try:
+            req = urllib.request.Request(
+                f"{NGINX_AGENT_URL.rstrip('/')}/services",
+                headers={"X-Reload-Token": NGINX_AGENT_TOKEN} if NGINX_AGENT_TOKEN else {},
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            payload = data.get("services", [])
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+            return []
+    if payload is None:
+        return []
+
+    services = []
+    for item in payload:
+        if "Spec" in item:
+            spec = item.get("Spec", {}) or {}
+            image = (
+                (spec.get("TaskTemplate", {}) or {})
+                .get("ContainerSpec", {})
+                .get("Image", "")
+            )
+            mode = "replicated"
+            if "Global" in spec.get("Mode", {}):
+                mode = "global"
+            ports_src = (item.get("Endpoint", {}) or {}).get("Ports", []) or []
+            name = spec.get("Name", "")
+        else:
+            name = str(item.get("name", ""))
+            image = str(item.get("image", ""))
+            mode = str(item.get("mode", "replicated"))
+            ports_src = item.get("ports", []) or []
+
+        ports = []
+        upstreams = []
+        for port in ports_src:
+            target = str(port.get("TargetPort") or port.get("target") or "")
+            published = str(port.get("PublishedPort") or port.get("published") or "")
+            protocol = str(port.get("Protocol") or port.get("protocol") or "")
+            ports.append(
+                {
+                    "target": target,
+                    "published": published,
+                    "protocol": protocol,
+                }
+            )
+            if target and protocol.lower() in ("", "tcp"):
+                upstreams.append(f"http://{name}:{target}")
+        services.append(
+            {
+                "name": name,
+                "image": image,
+                "mode": mode,
+                "ports": ports,
+                "upstreams": upstreams,
+            }
+        )
+    return services
+
+
 def reload_nginx() -> None:
     if NGINX_AGENT_URL:
         try:

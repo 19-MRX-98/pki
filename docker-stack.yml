@@ -49,6 +49,7 @@ services:
     image: ghcr.io/19-mrx-98/pki-agent:latest
     environment:
       AGENT_TOKEN: change-me
+      NGINX_RELOAD_SERVICE: pki-reverseproxy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:

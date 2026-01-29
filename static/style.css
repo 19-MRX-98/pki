@@ -372,8 +372,16 @@ button {
   background: var(--surface-muted);
 }
 
+.table-row > div {
+  min-width: 0;
+}
+
 .vhost-table .table-row {
   grid-template-columns: 1.2fr 0.8fr 1fr 0.9fr 1fr;
+}
+
+.swarm-table .table-row {
+  grid-template-columns: 1.1fr 1.6fr 0.7fr 0.9fr 1.2fr;
 }
 
 .raw-details summary {
@@ -422,6 +430,12 @@ button {
   border: 1px solid var(--border);
   border-radius: 6px;
   display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.table-cell-wrap {
+  overflow-wrap: anywhere;
 }
 
 .issued-meta {

@@ -165,4 +165,52 @@
       <p class="muted">Keine Container gefunden (oder kein Zugriff auf Docker Socket).</p>
     {% endif %}
   </section>
+
+  <section class="card">
+    <h2>Swarm Services</h2>
+    {% if swarm_services %}
+      <div class="table swarm-table">
+        <div class="table-row table-head">
+          <div>Service</div>
+          <div>Image</div>
+          <div>Mode</div>
+          <div>Ports</div>
+          <div>Upstream</div>
+        </div>
+        {% for item in swarm_services %}
+          <div class="table-row">
+            <div>{{ item.name }}</div>
+            <div class="table-cell-wrap">{{ item.image }}</div>
+            <div>{{ item.mode }}</div>
+            <div>
+              {% if item.ports %}
+                {% for port in item.ports %}
+                  <div>
+                    {{ port.target }}
+                    {% if port.published %}
+                      → {{ port.published }}
+                    {% endif %}
+                    {{ port.protocol }}
+                  </div>
+                {% endfor %}
+              {% else %}
+                <span class="muted">-</span>
+              {% endif %}
+            </div>
+            <div>
+              {% if item.upstreams %}
+                {% for upstream in item.upstreams %}
+                  <div class="code-inline">{{ upstream }}</div>
+                {% endfor %}
+              {% else %}
+                <span class="muted">-</span>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Keine Swarm-Services gefunden (oder kein Zugriff auf Docker API).</p>
+    {% endif %}
+  </section>
 {% endblock %}

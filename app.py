@@ -30,6 +30,7 @@ from pki_nginx import (
     list_vhosts,
     load_defaults,
     list_local_containers,
+    list_swarm_services,
     parse_domains,
     reload_nginx,
     save_defaults,
@@ -193,6 +194,7 @@ def nginx_page() -> str:
                 domains.append(name[:-5])
     domains = sorted(set(domains))
     containers = list_local_containers()
+    swarm_services = list_swarm_services()
     return render_template(
         "nginx.html",
         active_page="nginx_page",
@@ -206,6 +208,7 @@ def nginx_page() -> str:
         certificates=list_certificates_with_keys(),
         upstream_suggestions=list_upstream_suggestions(),
         containers=containers,
+        swarm_services=swarm_services,
     )
 
 
