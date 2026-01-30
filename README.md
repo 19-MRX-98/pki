@@ -93,6 +93,9 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 
 ## Docker Compose (Stack)
 
+- Compose-Datei herunterladen:
+  - `curl -L -o docker-compose.yml https://raw.githubusercontent.com/<owner>/<repo>/main/docker-compose.yml`
+  - GHCR-Variante: `curl -L -o docker-compose.ghcr.yml https://raw.githubusercontent.com/<owner>/<repo>/main/docker-compose.ghcr.yml`
 - `docker-compose.yml` enthält Profile:
   - `proxy`: PKI-App + Nginx Reverseproxy (Port 8443)
   - `standalone`: nur PKI-App ohne Reverseproxy-Funktionen
