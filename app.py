@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import secrets
 import shutil
 import subprocess
 
@@ -28,7 +29,12 @@ from pki_certificates import (
     verify_key_matches_csr,
 )
 from pki_enrollment import (
+    create_enrollment_token,
+    delete_enrollment_token,
+    list_enrollment_audit,
+    list_enrollment_tokens,
     record_enrollment_audit,
+    set_enrollment_token_active,
     verify_enrollment_token,
 )
 from pki_nginx import (
@@ -90,6 +96,7 @@ def build_nav_links(selected_ca: str) -> dict[str, str]:
             "home": url_for("home", ca=selected_ca),
             "cas_page": url_for("cas_page", ca=selected_ca),
             "certs_page": url_for("certs_page", ca=selected_ca),
+            "enrollment_page": url_for("enrollment_page", ca=selected_ca),
             "crl_page": url_for("crl_page", ca=selected_ca),
             "users_page": url_for("users_page", ca=selected_ca),
             "nginx_page": url_for("nginx_page", ca=selected_ca),
@@ -98,10 +105,45 @@ def build_nav_links(selected_ca: str) -> dict[str, str]:
         "home": url_for("home"),
         "cas_page": url_for("cas_page"),
         "certs_page": url_for("certs_page"),
+        "enrollment_page": url_for("enrollment_page"),
         "crl_page": url_for("crl_page"),
         "users_page": url_for("users_page"),
         "nginx_page": url_for("nginx_page"),
     }
+
+
+def _csrf_token() -> str:
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return str(session["csrf_token"])
+
+
+def _validate_csrf() -> bool:
+    submitted = request.form.get("csrf_token", "")
+    expected = session.get("csrf_token", "")
+    if not submitted or not expected:
+        return False
+    return secrets.compare_digest(submitted, str(expected))
+
+
+def _redirect_bad_csrf():
+    flash("Ungültiger Formular-Token.", "error")
+    return redirect(url_for("enrollment_page", ca=request.form.get("ca_slug") or request.args.get("ca")))
+
+
+def _render_enrollment_page(cas, selected_ca: str, new_token=None) -> str:
+    return render_template(
+        "enrollment.html",
+        active_page="enrollment_page",
+        nav_links=build_nav_links(selected_ca),
+        cas=cas,
+        selected_ca=selected_ca,
+        selected_ca_name=get_ca_name(cas, selected_ca) if selected_ca else "",
+        tokens=list_enrollment_tokens(),
+        audit_entries=list_enrollment_audit(),
+        new_token=new_token,
+        csrf_token=_csrf_token(),
+    )
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -436,6 +478,69 @@ def users_page() -> str:
         users=list_users(),
         current_user=session.get("username"),
     )
+
+
+@app.route("/enrollment", methods=["GET"])
+def enrollment_page() -> str:
+    prepare_storage()
+    cas = list_cas()
+    selected_ca = resolve_selected_ca(cas, request.args.get("ca"))
+    return _render_enrollment_page(cas, selected_ca, new_token=None)
+
+
+@app.route("/enrollment/create", methods=["POST"])
+def create_enrollment_token_route():
+    if not _validate_csrf():
+        return _redirect_bad_csrf()
+
+    prepare_storage()
+    name = request.form.get("name", "").strip()
+    ca_slug = request.form.get("ca_slug", "").strip()
+
+    if not name or not ca_slug:
+        flash("Bitte Name und CA angeben.", "error")
+        return redirect(url_for("enrollment_page", ca=ca_slug))
+
+    ca_dir = get_ca_dir(ca_slug)
+    if not ca_dir or not ca_exists(ca_dir):
+        flash("CA nicht gefunden.", "error")
+        return redirect(url_for("enrollment_page", ca=ca_slug))
+
+    created = create_enrollment_token(name, ca_slug)
+    flash("Enrollment-Token erstellt.", "success")
+    cas = list_cas()
+    selected_ca = resolve_selected_ca(cas, ca_slug)
+    return _render_enrollment_page(cas, selected_ca, new_token=created)
+
+
+@app.route("/enrollment/<int:token_id>/activate", methods=["POST"])
+def activate_enrollment_token_route(token_id: int):
+    if not _validate_csrf():
+        return _redirect_bad_csrf()
+
+    set_enrollment_token_active(token_id, True)
+    flash("Enrollment-Token aktiviert.", "success")
+    return redirect(url_for("enrollment_page", ca=request.args.get("ca")))
+
+
+@app.route("/enrollment/<int:token_id>/deactivate", methods=["POST"])
+def deactivate_enrollment_token_route(token_id: int):
+    if not _validate_csrf():
+        return _redirect_bad_csrf()
+
+    set_enrollment_token_active(token_id, False)
+    flash("Enrollment-Token deaktiviert.", "success")
+    return redirect(url_for("enrollment_page", ca=request.args.get("ca")))
+
+
+@app.route("/enrollment/<int:token_id>/delete", methods=["POST"])
+def delete_enrollment_token_route(token_id: int):
+    if not _validate_csrf():
+        return _redirect_bad_csrf()
+
+    delete_enrollment_token(token_id)
+    flash("Enrollment-Token gelöscht.", "success")
+    return redirect(url_for("enrollment_page", ca=request.args.get("ca")))
 
 
 @app.route("/users/create", methods=["POST"])

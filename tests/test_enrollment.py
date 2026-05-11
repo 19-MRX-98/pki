@@ -1,6 +1,7 @@
 import importlib
 import sqlite3
 import sys
+from http.cookies import SimpleCookie
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -51,6 +52,31 @@ def load_app_modules(tmp_path, monkeypatch):
     import pki_enrollment
 
     return app, pki_auth, pki_enrollment, pki_paths
+
+
+def create_test_ca(pki_paths, slug="ca-main"):
+    ca_dir = pki_paths.CA_ROOT / slug
+    (ca_dir / "certs").mkdir(parents=True)
+    (ca_dir / "private").mkdir(parents=True)
+    (ca_dir / "certs" / "ca.crt").write_text("not a real cert", encoding="utf-8")
+    (ca_dir / "private" / "ca.key").write_text("not a real key", encoding="utf-8")
+    return ca_dir
+
+
+def login_test_client(app_module):
+    client = app_module.app.test_client()
+    with client.session_transaction() as sess:
+        sess["user_id"] = 1
+        sess["username"] = "admin"
+    return client
+
+
+def decoded_session_from_response(app_module, response):
+    cookie_header = response.headers.get("Set-Cookie", "")
+    cookie = SimpleCookie(cookie_header)
+    session_cookie = cookie[app_module.app.config["SESSION_COOKIE_NAME"]].value
+    serializer = app_module.app.session_interface.get_signing_serializer(app_module.app)
+    return serializer.loads(session_cookie)
 
 
 def test_create_token_returns_plaintext_once_and_stores_hash(tmp_path, monkeypatch):
@@ -117,6 +143,45 @@ def test_audit_entry_is_recorded(tmp_path, monkeypatch):
     entries = pki_enrollment.list_enrollment_audit()
     assert entries[0]["token_id"] == verified["id"]
     assert entries[0]["certificate_slug"] == "host-20260511120000"
+
+
+def test_enrollment_create_requires_csrf(tmp_path, monkeypatch):
+    app_module, pki_auth, pki_enrollment, pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    create_test_ca(pki_paths)
+    client = login_test_client(app_module)
+
+    response = client.post(
+        "/enrollment/create",
+        data={"name": "node-a", "ca_slug": "ca-main"},
+    )
+
+    assert response.status_code == 302
+    assert pki_enrollment.list_enrollment_tokens() == []
+
+
+def test_enrollment_create_does_not_store_plaintext_token_in_session_cookie(tmp_path, monkeypatch):
+    app_module, pki_auth, pki_enrollment, pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    create_test_ca(pki_paths)
+    client = login_test_client(app_module)
+    with client.session_transaction() as sess:
+        sess["csrf_token"] = "csrf-test-token"
+
+    response = client.post(
+        "/enrollment/create",
+        data={"name": "node-a", "ca_slug": "ca-main", "csrf_token": "csrf-test-token"},
+    )
+
+    assert response.status_code == 200
+    assert b"pki_" in response.data
+    cookie_header = response.headers.get("Set-Cookie", "")
+    assert "new_enrollment_token" not in cookie_header
+    assert "plain_token" not in cookie_header
+    decoded = decoded_session_from_response(app_module, response)
+    assert "new_enrollment_token" not in decoded
+    assert all(not (isinstance(value, str) and value.startswith("pki_")) for value in decoded.values())
+    assert len(pki_enrollment.list_enrollment_tokens()) == 1
 
 
 def test_api_enroll_missing_token_returns_invalid_token(tmp_path, monkeypatch):

@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <h1>Enrollment</h1>
+      <p class="muted">Enrollment-Tokens fuer automatische Zertifikatsanfragen verwalten.</p>
+    </div>
+  </header>
+
+  {% if new_token %}
+    <section class="card">
+      <h2>Neuer Token</h2>
+      <p class="muted">Dieser Token wird nur einmal angezeigt.</p>
+      <div class="code-block">{{ new_token.plain_token }}</div>
+    </section>
+  {% endif %}
+
+  <section class="card">
+    <h2>Token erstellen</h2>
+    <form method="post" action="{{ url_for('create_enrollment_token_route') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <label>
+        Name
+        <input name="name" placeholder="node-a" required />
+      </label>
+      <label>
+        CA auswaehlen
+        <select name="ca_slug" required>
+          {% if cas %}
+            {% for ca in cas %}
+              <option value="{{ ca.slug }}" {% if ca.slug == selected_ca %}selected{% endif %}>
+                {{ ca.name }} ({{ ca.slug }})
+              </option>
+            {% endfor %}
+          {% else %}
+            <option value="" selected>Keine CA vorhanden</option>
+          {% endif %}
+        </select>
+      </label>
+      <button type="submit">Token erstellen</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Tokens</h2>
+    {% if tokens %}
+      <div class="table">
+        <div class="table-row table-head">
+          <div>Name</div>
+          <div>CA</div>
+          <div>Status</div>
+          <div>Erstellt / genutzt</div>
+          <div>Aktionen</div>
+        </div>
+        {% for token in tokens %}
+          <div class="table-row">
+            <div>{{ token.name }}</div>
+            <div>{{ token.ca_slug }}</div>
+            <div>
+              {% if token.active %}
+                <span class="status ok">Aktiv</span>
+              {% else %}
+                <span class="status warn">Inaktiv</span>
+              {% endif %}
+            </div>
+            <div>
+              <div>{{ token.created_at }}</div>
+              <div class="muted">
+                {% if token.last_used_at %}
+                  {{ token.last_used_at }}
+                {% else %}
+                  Nie genutzt
+                {% endif %}
+              </div>
+            </div>
+            <div class="inline-actions">
+              {% if token.active %}
+                <form
+                  class="inline-form"
+                  method="post"
+                  action="{{ url_for('deactivate_enrollment_token_route', token_id=token.id, ca=selected_ca) }}"
+                >
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button class="button-secondary" type="submit">Deaktivieren</button>
+                </form>
+              {% else %}
+                <form
+                  class="inline-form"
+                  method="post"
+                  action="{{ url_for('activate_enrollment_token_route', token_id=token.id, ca=selected_ca) }}"
+                >
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button class="button-secondary" type="submit">Aktivieren</button>
+                </form>
+              {% endif %}
+              <form
+                class="inline-form"
+                method="post"
+                action="{{ url_for('delete_enrollment_token_route', token_id=token.id, ca=selected_ca) }}"
+              >
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button class="button-danger" type="submit">Loeschen</button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Noch keine Enrollment-Tokens vorhanden.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Audit</h2>
+    {% if audit_entries %}
+      <div class="table">
+        <div class="table-row table-head">
+          <div>Zertifikat</div>
+          <div>Token / CA</div>
+          <div>Gueltigkeit</div>
+          <div>Subject / SANs</div>
+          <div>Erstellt</div>
+        </div>
+        {% for entry in audit_entries %}
+          <div class="table-row">
+            <div>{{ entry.certificate_slug }}</div>
+            <div>
+              <div>Token {{ entry.token_id }}</div>
+              <div class="muted">{{ entry.ca_slug }}</div>
+            </div>
+            <div>{{ entry.validity_days }} Tage</div>
+            <div>
+              <div>{{ entry.subject }}</div>
+              <div class="muted">
+                {% if entry.sans %}
+                  {{ entry.sans }}
+                {% else %}
+                  Keine SANs
+                {% endif %}
+              </div>
+            </div>
+            <div>{{ entry.created_at }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Noch keine Enrollment-Audits vorhanden.</p>
+    {% endif %}
+  </section>
+{% endblock %}
