@@ -27,6 +27,9 @@ def ensure_db() -> None:
             )
             """
         )
+        from pki_enrollment import ensure_enrollment_tables
+
+        ensure_enrollment_tables(conn)
         row = conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()
         if row and row["count"] == 0:
             _create_user(conn, "admin", "admin")
