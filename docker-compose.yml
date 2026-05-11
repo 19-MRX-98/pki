@@ -4,7 +4,7 @@ services:
     container_name: pki-app
     profiles: ["proxy"]
     ports:
-      - "5000:5000"
+      - "5001:5000"
     env_file:
       - .env
     environment:
