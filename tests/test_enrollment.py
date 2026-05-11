@@ -1,5 +1,6 @@
 import importlib
 import sqlite3
+import subprocess
 import sys
 from http.cookies import SimpleCookie
 from datetime import UTC, datetime, timedelta
@@ -244,6 +245,7 @@ def test_api_enroll_returns_renew_after_before_expiration(tmp_path, monkeypatch)
         return "host-20260511120000", cert_path, csr_path, cert_dir
 
     monkeypatch.setattr(app_module, "issue_from_csr", fake_issue_from_csr)
+    monkeypatch.setattr(app_module, "validate_csr_pem", lambda _csr_bytes: True)
     monkeypatch.setattr(app_module, "certificate_enddate_iso", lambda _path: "2099-01-01T00:00:00Z")
     monkeypatch.setattr(app_module, "csr_subject", lambda _path: "CN=host.example")
     monkeypatch.setattr(app_module, "csr_sans", lambda _path: "DNS:host.example")
@@ -264,3 +266,34 @@ def test_api_enroll_returns_renew_after_before_expiration(tmp_path, monkeypatch)
     renew_after = datetime.fromisoformat(body["renew_after"].replace("Z", "+00:00"))
     assert body["renew_after"] != body["expires_at"]
     assert before <= renew_after <= after
+
+
+def test_api_enroll_signing_failure_returns_server_error_after_csr_validation(
+    tmp_path, monkeypatch
+):
+    app_module, pki_auth, pki_enrollment, pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    ca_dir = pki_paths.CA_ROOT / "ca-main"
+    (ca_dir / "certs").mkdir(parents=True)
+    (ca_dir / "private").mkdir(parents=True)
+    (ca_dir / "certs" / "ca.crt").write_text("not used by this test", encoding="utf-8")
+    (ca_dir / "private" / "ca.key").write_text("not used by this test", encoding="utf-8")
+    token = pki_enrollment.create_enrollment_token("node-a", "ca-main")
+
+    def fail_issue_from_csr(_ca_path, _csr_bytes, _days_valid):
+        raise subprocess.CalledProcessError(1, "openssl")
+
+    monkeypatch.setattr(app_module, "validate_csr_pem", lambda _csr_bytes: True)
+    monkeypatch.setattr(app_module, "issue_from_csr", fail_issue_from_csr)
+
+    response = app_module.app.test_client().post(
+        "/api/v1/enroll",
+        headers={"Authorization": f"Bearer {token['plain_token']}"},
+        json={
+            "csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\nabc\n-----END CERTIFICATE REQUEST-----",
+            "validity_days": 90,
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.get_json() == {"error": "signing_failed"}

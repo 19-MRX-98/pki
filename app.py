@@ -26,6 +26,7 @@ from pki_certificates import (
     issue_certificate,
     issue_from_csr,
     revoke_certificate,
+    validate_csr_pem,
     verify_key_matches_csr,
 )
 from pki_enrollment import (
@@ -882,10 +883,13 @@ def api_enroll():
     csr_pem = str(payload.get("csr_pem", ""))
     if "BEGIN CERTIFICATE REQUEST" not in csr_pem:
         return jsonify({"error": "invalid_csr"}), 400
+    csr_bytes = csr_pem.encode("utf-8")
+    if not validate_csr_pem(csr_bytes):
+        return jsonify({"error": "invalid_csr"}), 400
 
     try:
         cert_slug, cert_path, csr_path, _cert_dir = issue_from_csr(
-            ca_dir, csr_pem.encode("utf-8"), validity_days
+            ca_dir, csr_bytes, validity_days
         )
         ca_cert_path = ca_dir / "certs" / "ca.crt"
         cert_pem = cert_path.read_text(encoding="utf-8")
@@ -900,7 +904,7 @@ def api_enroll():
             validity_days=validity_days,
         )
     except subprocess.CalledProcessError:
-        return jsonify({"error": "invalid_csr"}), 400
+        return jsonify({"error": "signing_failed"}), 500
     except OSError:
         return jsonify({"error": "write_failed"}), 500
 

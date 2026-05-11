@@ -99,6 +99,22 @@ def verify_key_matches_csr(csr_bytes: bytes, key_bytes: bytes) -> bool:
                 pass
 
 
+def validate_csr_pem(csr_bytes: bytes) -> bool:
+    with tempfile.NamedTemporaryFile(suffix=".csr", delete=False) as csr_file:
+        csr_file.write(csr_bytes)
+        csr_path = Path(csr_file.name)
+    try:
+        run_openssl_capture(["req", "-in", str(csr_path), "-noout"])
+        return True
+    except subprocess.CalledProcessError:
+        return False
+    finally:
+        try:
+            csr_path.unlink()
+        except OSError:
+            pass
+
+
 def issue_certificate(
     ca_dir: Path,
     common_name: str,
