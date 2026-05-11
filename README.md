@@ -54,6 +54,29 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 - Zertifikate lassen sich im Browser mit Rohdaten (PEM) und OpenSSL-Details anzeigen.
 - Bei CSR-Importen wird kein Private Key angezeigt (falls keiner hochgeladen wurde).
 
+## Enrollment API
+
+- Im UI unter **Enrollment** ein Enrollment-Token für die gewünschte CA erstellen.
+- Das Token ist an diese CA gebunden, hat keine feste Ablaufzeit und bleibt gültig,
+  bis es deaktiviert oder gelöscht wird.
+- Das Token wird nur einmal direkt nach der Erstellung angezeigt. Danach ist nur noch
+  der Hash gespeichert.
+- Der Private Key bleibt auf dem Client. Die API nimmt nur einen CSR entgegen und gibt
+  das signierte Zertifikat plus CA-Zertifikat als JSON zurück.
+
+```bash
+curl -X POST http://localhost:5000/api/v1/enroll \
+  -H "Authorization: Bearer pki_TOKEN_HIER_EINFUEGEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n",
+    "validity_days": 90
+  }'
+```
+
+Antwortfelder sind u. a. `certificate_pem`, `ca_certificate_pem`, `expires_at`,
+`renew_after`, `ca_slug` und `certificate_slug`.
+
 ## Sperrlisten (CRL)
 
 - Für jede CA kann eine CRL erzeugt und heruntergeladen werden.
