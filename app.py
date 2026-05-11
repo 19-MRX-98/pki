@@ -5,7 +5,7 @@ import os
 import shutil
 import subprocess
 
-from flask import Flask, flash, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from pathlib import Path
 from werkzeug.utils import secure_filename
 
@@ -19,10 +19,17 @@ from pki_auth import (
 )
 from pki_ca import ca_crl_path, ca_exists, create_ca, generate_crl
 from pki_certificates import (
+    certificate_enddate_iso,
+    csr_sans,
+    csr_subject,
     issue_certificate,
     issue_from_csr,
     revoke_certificate,
     verify_key_matches_csr,
+)
+from pki_enrollment import (
+    record_enrollment_audit,
+    verify_enrollment_token,
 )
 from pki_nginx import (
     delete_vhost,
@@ -63,7 +70,7 @@ NGINX_FEATURES = os.environ.get("NGINX_FEATURES", "1") != "0"
 
 @app.before_request
 def require_authentication():
-    if request.endpoint in {"login", "static"}:
+    if request.endpoint in {"login", "static", "api_enroll"}:
         ensure_db()
         return None
     ensure_db()
@@ -727,6 +734,81 @@ def import_csr_route():
 
     flash("CSR erfolgreich signiert.", "success")
     return redirect(url_for("certs_page", ca=ca_slug))
+
+
+def _bearer_token() -> str:
+    header = request.headers.get("Authorization", "")
+    prefix = "Bearer "
+    if not header.startswith(prefix):
+        return ""
+    return header[len(prefix) :].strip()
+
+
+def _renew_after_iso(validity_days: int) -> str:
+    renew_days = max(validity_days - 30, 1)
+    renew_after = datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(days=renew_days)
+    return renew_after.isoformat().replace("+00:00", "Z")
+
+
+@app.route("/api/v1/enroll", methods=["POST"])
+def api_enroll():
+    prepare_storage()
+    token_value = _bearer_token()
+    if not token_value:
+        return jsonify({"error": "invalid_token"}), 401
+
+    token_row = verify_enrollment_token(token_value)
+    if not token_row:
+        return jsonify({"error": "invalid_token"}), 401
+
+    ca_slug = str(token_row["ca_slug"])
+    ca_dir = get_ca_dir(ca_slug)
+    if not ca_dir or not ca_exists(ca_dir):
+        return jsonify({"error": "ca_not_found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        validity_days = int(payload.get("validity_days", 90))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid_validity_days"}), 400
+    if validity_days not in {90, 365, 730}:
+        return jsonify({"error": "invalid_validity_days"}), 400
+
+    csr_pem = str(payload.get("csr_pem", ""))
+    if "BEGIN CERTIFICATE REQUEST" not in csr_pem:
+        return jsonify({"error": "invalid_csr"}), 400
+
+    try:
+        cert_slug, cert_path, csr_path, _cert_dir = issue_from_csr(
+            ca_dir, csr_pem.encode("utf-8"), validity_days
+        )
+        ca_cert_path = ca_dir / "certs" / "ca.crt"
+        cert_pem = cert_path.read_text(encoding="utf-8")
+        ca_pem = ca_cert_path.read_text(encoding="utf-8")
+        expires_at = certificate_enddate_iso(cert_path)
+        record_enrollment_audit(
+            token_id=int(token_row["id"]),
+            ca_slug=ca_slug,
+            certificate_slug=cert_slug,
+            subject=csr_subject(csr_path),
+            sans=csr_sans(csr_path),
+            validity_days=validity_days,
+        )
+    except subprocess.CalledProcessError:
+        return jsonify({"error": "invalid_csr"}), 400
+    except OSError:
+        return jsonify({"error": "write_failed"}), 500
+
+    return jsonify(
+        {
+            "certificate_pem": cert_pem,
+            "ca_certificate_pem": ca_pem,
+            "expires_at": expires_at,
+            "renew_after": _renew_after_iso(validity_days),
+            "ca_slug": ca_slug,
+            "certificate_slug": cert_slug,
+        }
+    )
 
 
 @app.route("/ca/<slug>/download", methods=["GET"])

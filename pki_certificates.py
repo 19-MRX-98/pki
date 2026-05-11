@@ -222,6 +222,30 @@ def issue_from_csr(
     return cert_slug, cert_path, csr_path, cert_dir
 
 
+def certificate_enddate_iso(cert_path: Path) -> str:
+    output = run_openssl_capture(["x509", "-in", str(cert_path), "-noout", "-enddate"]).strip()
+    raw_value = output.split("=", 1)[1]
+    parsed = datetime.datetime.strptime(raw_value, "%b %d %H:%M:%S %Y %Z")
+    return parsed.replace(tzinfo=datetime.UTC).isoformat().replace("+00:00", "Z")
+
+
+def csr_subject(csr_path: Path) -> str:
+    output = run_openssl_capture(["req", "-in", str(csr_path), "-noout", "-subject"]).strip()
+    return output.replace("subject=", "", 1).strip()
+
+
+def csr_sans(csr_path: Path) -> str:
+    try:
+        output = run_openssl_capture(["req", "-in", str(csr_path), "-noout", "-text"])
+    except subprocess.CalledProcessError:
+        return ""
+    lines = output.splitlines()
+    for index, line in enumerate(lines):
+        if "Subject Alternative Name" in line and index + 1 < len(lines):
+            return lines[index + 1].strip()
+    return ""
+
+
 def revoke_certificate(ca_dir: Path, cert_path: Path) -> None:
     config_path = ensure_ca_config(ca_dir)
     run_openssl(["ca", "-batch", "-config", str(config_path), "-revoke", str(cert_path)])
