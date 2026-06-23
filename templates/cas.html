@@ -25,6 +25,18 @@
       </label>
       <button type="submit">CA erstellen</button>
     </form>
+    <h2>CA-Backup importieren</h2>
+    <form method="post" action="{{ url_for('import_ca_route') }}" enctype="multipart/form-data">
+      <label>
+        CA-Backup-ZIP
+        <input name="ca_import_file" type="file" accept=".zip,application/zip" required />
+      </label>
+      <label>
+        Ziel-Slug (optional)
+        <input name="ca_import_slug" />
+      </label>
+      <button type="submit">CA-Backup importieren</button>
+    </form>
     <div class="inline-actions">
       {% if cas %}
         <span class="status ok">{{ cas | length }} CA(s) vorhanden</span>
