@@ -345,6 +345,20 @@ def zip_directory(source_dir: Path, prefix: str | None = None) -> io.BytesIO:
     return buffer
 
 
+def zip_files_only(source_dir: Path, prefix: str | None = None) -> io.BytesIO:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for path in source_dir.rglob("*"):
+            if path.is_dir():
+                continue
+            arcname = path.relative_to(source_dir).as_posix()
+            if prefix:
+                arcname = f"{prefix}/{arcname}"
+            archive.write(path, arcname)
+    buffer.seek(0)
+    return buffer
+
+
 def test_import_valid_zip_with_top_level_folder(tmp_path, monkeypatch):
     pki_ca_import, pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
     source = tmp_path / "backup"
@@ -360,6 +374,49 @@ def test_import_valid_zip_with_top_level_folder(tmp_path, monkeypatch):
     assert (ca_dir / "openssl.cnf").exists()
     assert pki_storage.list_cas()[0]["slug"] == "restored-root"
     assert pki_storage.list_cas()[0]["name"] == "Restored Root"
+
+
+def test_import_regenerates_openssl_config_with_final_ca_dir(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_ca(source, "Config Path CA")
+    archive = zip_directory(source)
+
+    slug = pki_ca_import.import_ca_zip(archive, "config-path-ca")
+
+    ca_dir = pki_paths.CA_ROOT / slug
+    config_text = (ca_dir / "openssl.cnf").read_text(encoding="utf-8")
+    assert f"dir = {ca_dir}" in config_text
+    assert "-import-" not in config_text
+
+
+def test_import_restricts_private_key_permissions(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_ca(source, "Key Mode CA")
+    (source / "private" / "ca.key").chmod(0o644)
+    archive = zip_directory(source)
+
+    slug = pki_ca_import.import_ca_zip(archive, "key-mode-ca")
+
+    ca_key = pki_paths.CA_ROOT / slug / "private" / "ca.key"
+    assert ca_key.stat().st_mode & 0o777 == 0o600
+
+
+def test_import_accepts_zip_without_explicit_directory_entries(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_ca(source, "Implicit Dirs CA")
+    (source / "newcerts" / "placeholder.txt").write_text("", encoding="utf-8")
+    (source / "crl" / "placeholder.txt").write_text("", encoding="utf-8")
+    archive = zip_files_only(source)
+
+    slug = pki_ca_import.import_ca_zip(archive, "implicit-dirs-ca")
+
+    ca_dir = pki_paths.CA_ROOT / slug
+    assert (ca_dir / "certs" / "ca.crt").exists()
+    assert (ca_dir / "newcerts" / "placeholder.txt").exists()
+    assert (ca_dir / "crl" / "placeholder.txt").exists()
 
 
 def test_import_valid_zip_with_root_files_and_explicit_slug(tmp_path, monkeypatch):

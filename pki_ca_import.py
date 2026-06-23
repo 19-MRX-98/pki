@@ -105,6 +105,13 @@ def _validate_required_structure(
         raise CaImportError("Import abgebrochen: Pflichtbestandteile fehlen.")
 
 
+def _parent_dirs(path: PurePosixPath) -> set[PurePosixPath]:
+    return {
+        PurePosixPath(*path.parts[:index])
+        for index in range(1, len(path.parts))
+    }
+
+
 def _read_ca_common_name(ca_cert: Path) -> str:
     try:
         output = run_openssl_capture(["x509", "-in", str(ca_cert), "-noout", "-subject"]).strip()
@@ -239,6 +246,7 @@ def import_ca_zip(archive_file: BinaryIO, target_slug: str | None = None) -> str
                 dir_paths.add(relative_target)
             else:
                 file_map[member.name] = relative_target
+                dir_paths.update(_parent_dirs(relative_target))
 
         _validate_required_structure(set(file_map.values()), dir_paths)
 
@@ -261,6 +269,8 @@ def import_ca_zip(archive_file: BinaryIO, target_slug: str | None = None) -> str
                         shutil.copyfileobj(source_file, out_file)
                 except zipfile.BadZipFile as exc:
                     raise CaImportError("Import abgebrochen: ungueltige ZIP-Datei.") from exc
+                if relative_target == PurePosixPath("private/ca.key"):
+                    destination.chmod(0o600)
 
             safe_slug = _derive_slug(
                 target_slug, top_level_folder, staging_dir / "certs" / "ca.crt"
@@ -272,13 +282,17 @@ def import_ca_zip(archive_file: BinaryIO, target_slug: str | None = None) -> str
             _validate_ca_material(staging_dir)
 
             ensure_ca_dirs(staging_dir)
-            ensure_ca_config(staging_dir)
 
             CA_ROOT.mkdir(parents=True, exist_ok=True)
             if target_dir.exists():
                 raise CaImportError("Import abgebrochen: Ziel-Slug existiert bereits.")
             _publish_staging_dir(staging_dir, target_dir)
             staging_dir = None
+            try:
+                ensure_ca_config(target_dir)
+            except OSError as exc:
+                shutil.rmtree(target_dir, ignore_errors=True)
+                raise CaImportError("Import abgebrochen: CA konnte nicht geschrieben werden.") from exc
         finally:
             if staging_dir is not None and staging_dir.exists():
                 shutil.rmtree(staging_dir)
