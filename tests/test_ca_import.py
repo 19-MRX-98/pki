@@ -1,6 +1,7 @@
 import importlib
 import io
 import inspect
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -162,3 +163,233 @@ def test_import_rejects_corrupt_zip_member(tmp_path, monkeypatch):
 
     with pytest.raises(pki_ca_import.CaImportError, match="ungueltige ZIP-Datei"):
         pki_ca_import.import_ca_zip(archive, "imported-ca")
+
+
+def run(cmd: list[str]) -> None:
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+def create_openssl_ca(source_dir: Path, common_name: str = "Imported CA") -> None:
+    (source_dir / "certs").mkdir(parents=True)
+    (source_dir / "private").mkdir(parents=True)
+    (source_dir / "newcerts").mkdir(parents=True)
+    (source_dir / "crl").mkdir(parents=True)
+    (source_dir / "index.txt").write_text("", encoding="utf-8")
+    (source_dir / "serial").write_text("1000\n", encoding="utf-8")
+    (source_dir / "crlnumber").write_text("1000\n", encoding="utf-8")
+    run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(source_dir / "private" / "ca.key"),
+            "-out",
+            str(source_dir / "certs" / "ca.crt"),
+            "-days",
+            "365",
+            "-subj",
+            f"/CN={common_name}",
+        ]
+    )
+
+
+def create_openssl_leaf_cert(source_dir: Path, common_name: str = "Imported Leaf") -> None:
+    (source_dir / "certs").mkdir(parents=True)
+    (source_dir / "private").mkdir(parents=True)
+    (source_dir / "newcerts").mkdir(parents=True)
+    (source_dir / "crl").mkdir(parents=True)
+    (source_dir / "index.txt").write_text("", encoding="utf-8")
+    (source_dir / "serial").write_text("1000\n", encoding="utf-8")
+    (source_dir / "crlnumber").write_text("1000\n", encoding="utf-8")
+    run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(source_dir / "private" / "ca.key"),
+            "-out",
+            str(source_dir / "certs" / "ca.crt"),
+            "-days",
+            "365",
+            "-subj",
+            f"/CN={common_name}",
+            "-addext",
+            "basicConstraints=critical,CA:FALSE",
+            "-addext",
+            "keyUsage=digitalSignature,keyEncipherment",
+        ]
+    )
+
+
+def zip_directory(source_dir: Path, prefix: str | None = None) -> io.BytesIO:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for path in source_dir.rglob("*"):
+            arcname = path.relative_to(source_dir).as_posix()
+            if prefix:
+                arcname = f"{prefix}/{arcname}"
+            if path.is_dir():
+                archive.writestr(f"{arcname}/", b"")
+            else:
+                archive.write(path, arcname)
+    buffer.seek(0)
+    return buffer
+
+
+def test_import_valid_zip_with_top_level_folder(tmp_path, monkeypatch):
+    pki_ca_import, pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_ca(source, "Restored Root")
+    archive = zip_directory(source, prefix="restored-root")
+
+    slug = pki_ca_import.import_ca_zip(archive)
+
+    assert slug == "restored-root"
+    ca_dir = pki_paths.CA_ROOT / slug
+    assert (ca_dir / "certs" / "ca.crt").exists()
+    assert (ca_dir / "private" / "ca.key").exists()
+    assert (ca_dir / "openssl.cnf").exists()
+    assert pki_storage.list_cas()[0]["slug"] == "restored-root"
+    assert pki_storage.list_cas()[0]["name"] == "Restored Root"
+
+
+def test_import_valid_zip_with_root_files_and_explicit_slug(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_ca(source, "Root Layout CA")
+    archive = zip_directory(source)
+
+    slug = pki_ca_import.import_ca_zip(archive, "manual-slug")
+
+    assert slug == "manual-slug"
+    assert (pki_paths.CA_ROOT / "manual-slug" / "certs" / "ca.crt").exists()
+
+
+def test_import_derives_slug_from_common_name_for_root_files(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_ca(source, "Common Name CA")
+    archive = zip_directory(source)
+
+    slug = pki_ca_import.import_ca_zip(archive)
+
+    assert slug == "Common_Name_CA"
+    assert (pki_paths.CA_ROOT / slug).exists()
+
+
+def test_import_existing_slug_aborts_without_overwrite(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    existing = pki_paths.CA_ROOT / "existing-ca"
+    (existing / "certs").mkdir(parents=True)
+    (existing / "private").mkdir(parents=True)
+    marker = existing / "marker.txt"
+    marker.write_text("keep", encoding="utf-8")
+    source = tmp_path / "backup"
+    create_openssl_ca(source)
+    archive = zip_directory(source)
+
+    with pytest.raises(pki_ca_import.CaImportError, match="existiert"):
+        pki_ca_import.import_ca_zip(archive, "existing-ca")
+
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_import_existing_empty_slug_aborts_without_overwrite(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    existing = pki_paths.CA_ROOT / "empty-ca"
+    existing.mkdir(parents=True)
+    source = tmp_path / "backup"
+    create_openssl_ca(source)
+    archive = zip_directory(source)
+
+    with pytest.raises(pki_ca_import.CaImportError, match="existiert"):
+        pki_ca_import.import_ca_zip(archive, "empty-ca")
+
+    assert existing.exists()
+    assert list(existing.iterdir()) == []
+
+
+def test_import_late_existing_empty_slug_aborts_without_overwrite(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_ca(source)
+    archive = zip_directory(source)
+    original_publish = pki_ca_import._publish_staging_dir
+
+    def publish_after_empty_target_appears(staging_dir: Path, target_dir: Path) -> None:
+        target_dir.mkdir()
+        original_publish(staging_dir, target_dir)
+
+    monkeypatch.setattr(
+        pki_ca_import, "_publish_staging_dir", publish_after_empty_target_appears
+    )
+
+    with pytest.raises(pki_ca_import.CaImportError, match="existiert"):
+        pki_ca_import.import_ca_zip(archive, "late-empty-ca")
+
+    target_dir = pki_paths.CA_ROOT / "late-empty-ca"
+    assert target_dir.exists()
+    assert list(target_dir.iterdir()) == []
+
+
+def test_import_rejects_non_ca_certificate_with_matching_key(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_leaf_cert(source)
+    archive = zip_directory(source)
+
+    with pytest.raises(pki_ca_import.CaImportError, match="CA-Zertifikat"):
+        pki_ca_import.import_ca_zip(archive, "leaf-cert")
+
+    assert not (pki_paths.CA_ROOT / "leaf-cert").exists()
+
+
+def test_import_rejects_mismatched_private_key(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, _pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_ca(source)
+    run(
+        [
+            "openssl",
+            "genrsa",
+            "-out",
+            str(source / "private" / "ca.key"),
+            "2048",
+        ]
+    )
+    archive = zip_directory(source)
+
+    with pytest.raises(pki_ca_import.CaImportError, match="passt nicht"):
+        pki_ca_import.import_ca_zip(archive, "bad-key")
+
+
+def test_import_rejects_encrypted_private_key(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, _pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    create_openssl_ca(source)
+    run(
+        [
+            "openssl",
+            "rsa",
+            "-aes256",
+            "-in",
+            str(source / "private" / "ca.key"),
+            "-out",
+            str(source / "private" / "encrypted.key"),
+            "-passout",
+            "pass:secret",
+        ]
+    )
+    (source / "private" / "encrypted.key").replace(source / "private" / "ca.key")
+    archive = zip_directory(source)
+
+    with pytest.raises(pki_ca_import.CaImportError, match="verschlüsselter Private Key"):
+        pki_ca_import.import_ca_zip(archive, "encrypted-key")

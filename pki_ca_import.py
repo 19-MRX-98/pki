@@ -105,6 +105,117 @@ def _validate_required_structure(
         raise CaImportError("Import abgebrochen: Pflichtbestandteile fehlen.")
 
 
+def _read_ca_common_name(ca_cert: Path) -> str:
+    try:
+        output = run_openssl_capture(["x509", "-in", str(ca_cert), "-noout", "-subject"]).strip()
+    except subprocess.CalledProcessError as exc:
+        raise CaImportError("Import abgebrochen: ungültiges CA-Zertifikat.") from exc
+
+    subject = output.removeprefix("subject=").strip()
+    for part in subject.split(","):
+        part = part.strip()
+        if part.startswith("CN="):
+            return part.replace("CN=", "", 1).strip()
+    return ""
+
+
+def _derive_slug(target_slug: str | None, top_level_folder: str | None, ca_cert: Path) -> str:
+    candidate = (target_slug or "").strip() or (top_level_folder or "").strip()
+    if not candidate:
+        candidate = _read_ca_common_name(ca_cert)
+    safe_slug = secure_filename(candidate)
+    if not safe_slug:
+        raise CaImportError("Import abgebrochen: ungueltiger CA-Name.")
+    return safe_slug
+
+
+def _key_looks_encrypted(ca_key: Path) -> bool:
+    try:
+        key_text = ca_key.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        raise CaImportError("Import abgebrochen: privater Key konnte nicht gelesen werden.") from exc
+    return "ENCRYPTED" in key_text or "Proc-Type: 4,ENCRYPTED" in key_text
+
+
+def _extension_text(cert_text: str, extension_name: str) -> str:
+    lines = cert_text.splitlines()
+    for index, line in enumerate(lines):
+        if extension_name not in line:
+            continue
+        extension_lines = [line]
+        for following in lines[index + 1 :]:
+            if following.startswith("            X509v3 "):
+                break
+            extension_lines.append(following)
+        return "\n".join(extension_lines)
+    return ""
+
+
+def _validate_ca_certificate_extensions(ca_cert: Path) -> None:
+    try:
+        cert_text = run_openssl_capture(
+            ["x509", "-in", str(ca_cert), "-noout", "-text"]
+        )
+    except subprocess.CalledProcessError as exc:
+        raise CaImportError("Import abgebrochen: ungültiges CA-Zertifikat.") from exc
+
+    basic_constraints = _extension_text(cert_text, "X509v3 Basic Constraints")
+    if "CA:TRUE" not in basic_constraints:
+        raise CaImportError(
+            "Import abgebrochen: CA-Zertifikat ist nicht als CA nutzbar."
+        )
+
+    key_usage = _extension_text(cert_text, "X509v3 Key Usage")
+    if key_usage and "Certificate Sign" not in key_usage and "keyCertSign" not in key_usage:
+        raise CaImportError(
+            "Import abgebrochen: CA-Zertifikat darf keine Zertifikate signieren."
+        )
+
+
+def _validate_ca_material(ca_dir: Path) -> None:
+    ca_cert = ca_dir / "certs" / "ca.crt"
+    ca_key = ca_dir / "private" / "ca.key"
+    if _key_looks_encrypted(ca_key):
+        raise CaImportError(
+            "Import abgebrochen: verschlüsselter Private Key wird nicht unterstützt."
+        )
+
+    try:
+        cert_pubkey = run_openssl_capture(
+            ["x509", "-in", str(ca_cert), "-noout", "-pubkey"]
+        ).strip()
+    except subprocess.CalledProcessError as exc:
+        raise CaImportError("Import abgebrochen: ungültiges CA-Zertifikat.") from exc
+
+    _validate_ca_certificate_extensions(ca_cert)
+
+    try:
+        key_pubkey = run_openssl_capture(["pkey", "-in", str(ca_key), "-pubout"]).strip()
+    except subprocess.CalledProcessError as exc:
+        raise CaImportError("Import abgebrochen: ungültiger privater Key.") from exc
+
+    if cert_pubkey != key_pubkey:
+        raise CaImportError("Import abgebrochen: Private Key passt nicht zum CA-Zertifikat.")
+
+
+def _publish_staging_dir(staging_dir: Path, target_dir: Path) -> None:
+    try:
+        target_dir.mkdir()
+    except FileExistsError as exc:
+        raise CaImportError("Import abgebrochen: CA existiert bereits.") from exc
+    except OSError as exc:
+        raise CaImportError("Import abgebrochen: CA konnte nicht geschrieben werden.") from exc
+
+    try:
+        for child in staging_dir.iterdir():
+            shutil.move(str(child), str(target_dir / child.name))
+        staging_dir.rmdir()
+    except (OSError, shutil.Error) as exc:
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        raise CaImportError("Import abgebrochen: CA konnte nicht geschrieben werden.") from exc
+
+
 def import_ca_zip(archive_file: BinaryIO, target_slug: str | None = None) -> str:
     try:
         archive = zipfile.ZipFile(archive_file)
@@ -114,8 +225,8 @@ def import_ca_zip(archive_file: BinaryIO, target_slug: str | None = None) -> str
     with archive:
         zip_members = _safe_zip_members(archive)
         top_level_folder = _top_level_folder([member.path for member in zip_members])
-        safe_slug = secure_filename(target_slug or top_level_folder or "imported-ca")
-        if not safe_slug:
+        provisional_slug = secure_filename(target_slug or top_level_folder or "imported-ca")
+        if not provisional_slug:
             raise CaImportError("Import abgebrochen: ungueltiger CA-Name.")
 
         file_map: dict[str, PurePosixPath] = {}
@@ -131,13 +242,13 @@ def import_ca_zip(archive_file: BinaryIO, target_slug: str | None = None) -> str
 
         _validate_required_structure(set(file_map.values()), dir_paths)
 
-        target_dir = CA_ROOT / safe_slug
-        if target_dir.exists():
-            raise CaImportError("Import abgebrochen: CA existiert bereits.")
+        target_dir = CA_ROOT / provisional_slug
+        if (target_slug or top_level_folder) and target_dir.exists():
+            raise CaImportError("Import abgebrochen: Ziel-Slug existiert bereits.")
 
         CA_ROOT.parent.mkdir(parents=True, exist_ok=True)
         staging_dir = Path(
-            tempfile.mkdtemp(prefix=f".{safe_slug}-import-", dir=str(CA_ROOT.parent))
+            tempfile.mkdtemp(prefix=f".{provisional_slug}-import-", dir=str(CA_ROOT.parent))
         )
         try:
             for relative_dir in dir_paths:
@@ -151,23 +262,22 @@ def import_ca_zip(archive_file: BinaryIO, target_slug: str | None = None) -> str
                 except zipfile.BadZipFile as exc:
                     raise CaImportError("Import abgebrochen: ungueltige ZIP-Datei.") from exc
 
-            try:
-                run_openssl_capture(
-                    ["x509", "-in", str(staging_dir / "certs" / "ca.crt"), "-noout"]
-                )
-                run_openssl_capture(
-                    ["pkey", "-in", str(staging_dir / "private" / "ca.key"), "-noout"]
-                )
-            except subprocess.CalledProcessError as exc:
-                raise CaImportError("Import abgebrochen: ungueltiges CA-Material.") from exc
+            safe_slug = _derive_slug(
+                target_slug, top_level_folder, staging_dir / "certs" / "ca.crt"
+            )
+            target_dir = CA_ROOT / safe_slug
+            if target_dir.exists():
+                raise CaImportError("Import abgebrochen: Ziel-Slug existiert bereits.")
+
+            _validate_ca_material(staging_dir)
 
             ensure_ca_dirs(staging_dir)
             ensure_ca_config(staging_dir)
 
             CA_ROOT.mkdir(parents=True, exist_ok=True)
             if target_dir.exists():
-                raise CaImportError("Import abgebrochen: CA existiert bereits.")
-            staging_dir.replace(target_dir)
+                raise CaImportError("Import abgebrochen: Ziel-Slug existiert bereits.")
+            _publish_staging_dir(staging_dir, target_dir)
             staging_dir = None
         finally:
             if staging_dir is not None and staging_dir.exists():
