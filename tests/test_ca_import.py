@@ -390,6 +390,35 @@ def test_import_regenerates_openssl_config_with_final_ca_dir(tmp_path, monkeypat
     assert "-import-" not in config_text
 
 
+def test_import_overwrites_trusted_looking_openssl_config(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "backup"
+    slug = "trusted-config-ca"
+    ca_dir = pki_paths.CA_ROOT / slug
+    create_openssl_ca(source, "Trusted Config CA")
+    (source / "openssl.cnf").write_text(
+        f"""[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+dir = {ca_dir}
+private_key = /tmp/not-the-imported-key
+default_crl_days = 30
+crl_extensions = crl_ext
+""",
+        encoding="utf-8",
+    )
+    archive = zip_directory(source)
+
+    imported_slug = pki_ca_import.import_ca_zip(archive, slug)
+
+    config_text = (pki_paths.CA_ROOT / imported_slug / "openssl.cnf").read_text(
+        encoding="utf-8"
+    )
+    assert "/tmp/not-the-imported-key" not in config_text
+    assert "private_key = $dir/private/ca.key" in config_text
+
+
 def test_import_restricts_private_key_permissions(tmp_path, monkeypatch):
     pki_ca_import, _pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
     source = tmp_path / "backup"

@@ -289,6 +289,7 @@ def import_ca_zip(archive_file: BinaryIO, target_slug: str | None = None) -> str
             _publish_staging_dir(staging_dir, target_dir)
             staging_dir = None
             try:
+                (target_dir / "openssl.cnf").unlink(missing_ok=True)
                 ensure_ca_config(target_dir)
             except OSError as exc:
                 shutil.rmtree(target_dir, ignore_errors=True)
