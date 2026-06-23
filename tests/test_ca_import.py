@@ -266,6 +266,32 @@ def test_ca_import_route_missing_file_flashes_message(tmp_path, monkeypatch):
     assert "Bitte ein CA-Backup-ZIP auswählen." in response.get_data(as_text=True)
 
 
+def test_ca_backup_route_downloads_zip(tmp_path, monkeypatch):
+    app_module, pki_auth, _pki_storage, pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    create_openssl_ca(pki_paths.CA_ROOT / "backup-ca", "Backup Route CA")
+    client = login_test_client(app_module)
+
+    response = client.get("/ca/backup-ca/backup")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/zip"
+    assert "backup-ca-ca-backup.zip" in response.headers["Content-Disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        assert "private/ca.key" in archive.namelist()
+
+
+def test_ca_backup_route_missing_ca_redirects(tmp_path, monkeypatch):
+    app_module, pki_auth, _pki_storage, _pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    client = login_test_client(app_module)
+
+    response = client.get("/ca/missing/backup", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"CA nicht gefunden" in response.data
+
+
 def run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 

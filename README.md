@@ -43,6 +43,12 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 - Beim ersten Start werden bestehende Daten automatisch nach `default` migriert.
 - Im Zertifikate-Formular die gewünschte CA per Dropdown auswählen.
 
+## CA-Backup exportieren
+
+- Im Menü **CAs** kann pro CA ein vollständiges unverschlüsseltes ZIP-Backup heruntergeladen werden.
+- Das Backup enthält auch `private/ca.key` und muss sicher abgelegt werden.
+- Das ZIP nutzt dieselbe Struktur wie der CA-Import und kann direkt wieder importiert werden.
+
 ## CA-Backup importieren
 
 - Im Menü **CAs** kann ein CA-Backup als ZIP-Datei importiert werden.
