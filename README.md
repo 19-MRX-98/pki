@@ -43,6 +43,23 @@ Hinweis: Browser-Fehler `net::ERR_CERT_COMMON_NAME_INVALID` bedeutet meist, dass
 - Beim ersten Start werden bestehende Daten automatisch nach `default` migriert.
 - Im Zertifikate-Formular die gewünschte CA per Dropdown auswählen.
 
+## CA-Backup importieren
+
+- Im Menü **CAs** kann ein CA-Backup als ZIP-Datei importiert werden.
+- Das ZIP muss die OpenSSL-CA-Struktur enthalten:
+  - `certs/ca.crt`
+  - `private/ca.key`
+  - `index.txt`
+  - `serial`
+  - `crlnumber`
+  - `newcerts/`
+  - `crl/`
+- Die Dateien können direkt im Archiv-Root liegen oder in genau einem gemeinsamen Top-Level-Ordner.
+- Optional kann ein Ziel-Slug angegeben werden. Ohne Angabe wird der Slug aus dem Top-Level-Ordner oder dem Common Name des CA-Zertifikats abgeleitet.
+- Existiert der Ziel-Slug bereits, bricht der Import ab. Vorhandene CAs werden nicht überschrieben.
+- Passwortgeschützte private CA-Schlüssel werden nicht unterstützt.
+- `openssl.cnf` wird beim Import neu erzeugt und an die App angepasst, damit alle Pfade zum neuen Speicherort passen.
+
 ## CSR importieren
 
 - Im Bereich **CSR importieren** eine CSR-Datei (PEM) auswählen und signieren.
