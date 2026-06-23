@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import io
 import os
 import secrets
 import shutil
@@ -19,7 +20,7 @@ from pki_auth import (
     verify_user,
 )
 from pki_ca import ca_crl_path, ca_exists, create_ca, generate_crl
-from pki_ca_import import CaImportError, import_ca_zip
+from pki_ca_import import CaExportError, CaImportError, import_ca_zip, write_ca_backup_zip
 from pki_certificates import (
     certificate_enddate_iso,
     csr_sans,
@@ -952,6 +953,31 @@ def download_ca(slug: str):
         return redirect(url_for("cas_page", ca=slug))
     return send_file(
         ca_dir / "certs" / "ca.crt", as_attachment=True, download_name=f"{slug}.ca.crt"
+    )
+
+
+@app.route("/ca/<slug>/backup", methods=["GET"])
+def download_ca_backup(slug: str):
+    prepare_storage()
+    ca_dir = get_ca_dir(slug)
+    if not ca_dir or not ca_exists(ca_dir):
+        flash("CA nicht gefunden.", "error")
+        return redirect(url_for("cas_page", ca=slug))
+    output = io.BytesIO()
+    try:
+        write_ca_backup_zip(ca_dir, output)
+    except CaExportError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("cas_page", ca=slug))
+    except OSError as exc:
+        flash(f"CA-Backup konnte nicht erzeugt werden: {exc}", "error")
+        return redirect(url_for("cas_page", ca=slug))
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{slug}-ca-backup.zip",
     )
 
 

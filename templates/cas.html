@@ -64,6 +64,9 @@
               <a class="button-secondary" href="{{ url_for('download_ca', slug=ca.slug) }}">
                 CA-Zertifikat
               </a>
+              <a class="button-secondary" href="{{ url_for('download_ca_backup', slug=ca.slug) }}">
+                CA-Backup
+              </a>
               {% if ca.crl_ready %}
                 <a class="button-secondary" href="{{ url_for('download_crl', slug=ca.slug) }}">
                   CRL

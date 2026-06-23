@@ -266,6 +266,32 @@ def test_ca_import_route_missing_file_flashes_message(tmp_path, monkeypatch):
     assert "Bitte ein CA-Backup-ZIP auswählen." in response.get_data(as_text=True)
 
 
+def test_ca_backup_route_downloads_zip(tmp_path, monkeypatch):
+    app_module, pki_auth, _pki_storage, pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    create_openssl_ca(pki_paths.CA_ROOT / "backup-ca", "Backup Route CA")
+    client = login_test_client(app_module)
+
+    response = client.get("/ca/backup-ca/backup")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/zip"
+    assert "backup-ca-ca-backup.zip" in response.headers["Content-Disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        assert "private/ca.key" in archive.namelist()
+
+
+def test_ca_backup_route_missing_ca_redirects(tmp_path, monkeypatch):
+    app_module, pki_auth, _pki_storage, _pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    client = login_test_client(app_module)
+
+    response = client.get("/ca/missing/backup", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"CA nicht gefunden" in response.data
+
+
 def run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
@@ -357,6 +383,52 @@ def zip_files_only(source_dir: Path, prefix: str | None = None) -> io.BytesIO:
             archive.write(path, arcname)
     buffer.seek(0)
     return buffer
+
+
+def test_export_valid_ca_zip_contains_required_backup_files(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, _pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "source-ca"
+    create_openssl_ca(source, "Exported CA")
+    output = io.BytesIO()
+
+    pki_ca_import.write_ca_backup_zip(source, output)
+
+    output.seek(0)
+    with zipfile.ZipFile(output) as archive:
+        names = set(archive.namelist())
+        assert "certs/ca.crt" in names
+        assert "private/ca.key" in names
+        assert "index.txt" in names
+        assert "serial" in names
+        assert "crlnumber" in names
+        assert "newcerts/" in names
+        assert "crl/" in names
+        assert archive.read("private/ca.key")
+
+
+def test_exported_zip_can_be_imported(tmp_path, monkeypatch):
+    pki_ca_import, pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "source-ca"
+    create_openssl_ca(source, "Round Trip CA")
+    output = io.BytesIO()
+
+    pki_ca_import.write_ca_backup_zip(source, output)
+    output.seek(0)
+    imported_slug = pki_ca_import.import_ca_zip(output, "round-trip-ca")
+
+    assert imported_slug == "round-trip-ca"
+    assert (pki_paths.CA_ROOT / "round-trip-ca" / "private" / "ca.key").exists()
+    assert pki_storage.list_cas()[0]["name"] == "Round Trip CA"
+
+
+def test_export_rejects_incomplete_ca(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, _pki_paths = load_import_modules(tmp_path, monkeypatch)
+    ca_dir = tmp_path / "broken-ca"
+    (ca_dir / "certs").mkdir(parents=True)
+    (ca_dir / "certs" / "ca.crt").write_text("not enough", encoding="utf-8")
+
+    with pytest.raises(pki_ca_import.CaExportError, match="unvollständig"):
+        pki_ca_import.write_ca_backup_zip(ca_dir, io.BytesIO())
 
 
 def test_import_valid_zip_with_top_level_folder(tmp_path, monkeypatch):
