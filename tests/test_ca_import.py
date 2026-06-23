@@ -359,6 +359,52 @@ def zip_files_only(source_dir: Path, prefix: str | None = None) -> io.BytesIO:
     return buffer
 
 
+def test_export_valid_ca_zip_contains_required_backup_files(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, _pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "source-ca"
+    create_openssl_ca(source, "Exported CA")
+    output = io.BytesIO()
+
+    pki_ca_import.write_ca_backup_zip(source, output)
+
+    output.seek(0)
+    with zipfile.ZipFile(output) as archive:
+        names = set(archive.namelist())
+        assert "certs/ca.crt" in names
+        assert "private/ca.key" in names
+        assert "index.txt" in names
+        assert "serial" in names
+        assert "crlnumber" in names
+        assert "newcerts/" in names
+        assert "crl/" in names
+        assert archive.read("private/ca.key")
+
+
+def test_exported_zip_can_be_imported(tmp_path, monkeypatch):
+    pki_ca_import, pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
+    source = tmp_path / "source-ca"
+    create_openssl_ca(source, "Round Trip CA")
+    output = io.BytesIO()
+
+    pki_ca_import.write_ca_backup_zip(source, output)
+    output.seek(0)
+    imported_slug = pki_ca_import.import_ca_zip(output, "round-trip-ca")
+
+    assert imported_slug == "round-trip-ca"
+    assert (pki_paths.CA_ROOT / "round-trip-ca" / "private" / "ca.key").exists()
+    assert pki_storage.list_cas()[0]["name"] == "Round Trip CA"
+
+
+def test_export_rejects_incomplete_ca(tmp_path, monkeypatch):
+    pki_ca_import, _pki_storage, _pki_paths = load_import_modules(tmp_path, monkeypatch)
+    ca_dir = tmp_path / "broken-ca"
+    (ca_dir / "certs").mkdir(parents=True)
+    (ca_dir / "certs" / "ca.crt").write_text("not enough", encoding="utf-8")
+
+    with pytest.raises(pki_ca_import.CaExportError, match="unvollständig"):
+        pki_ca_import.write_ca_backup_zip(ca_dir, io.BytesIO())
+
+
 def test_import_valid_zip_with_top_level_folder(tmp_path, monkeypatch):
     pki_ca_import, pki_storage, pki_paths = load_import_modules(tmp_path, monkeypatch)
     source = tmp_path / "backup"

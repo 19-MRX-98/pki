@@ -17,6 +17,10 @@ class CaImportError(ValueError):
     pass
 
 
+class CaExportError(ValueError):
+    pass
+
+
 REQUIRED_FILES = {
     PurePosixPath("certs/ca.crt"),
     PurePosixPath("private/ca.key"),
@@ -103,6 +107,41 @@ def _validate_required_structure(
 ) -> None:
     if not REQUIRED_FILES.issubset(file_paths) or not REQUIRED_DIRS.issubset(dir_paths):
         raise CaImportError("Import abgebrochen: Pflichtbestandteile fehlen.")
+
+
+def validate_ca_backup_source(ca_dir: Path) -> None:
+    missing = []
+    for relative in REQUIRED_FILES:
+        if not (ca_dir / Path(*relative.parts)).is_file():
+            missing.append(str(relative))
+    for relative in REQUIRED_DIRS:
+        if not (ca_dir / Path(*relative.parts)).is_dir():
+            missing.append(str(relative))
+    if missing:
+        raise CaExportError("CA ist unvollständig und kann nicht exportiert werden.")
+
+
+def write_ca_backup_zip(ca_dir: Path, output_file) -> None:
+    validate_ca_backup_source(ca_dir)
+    with zipfile.ZipFile(output_file, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for relative in sorted(REQUIRED_DIRS, key=str):
+            archive.writestr(f"{relative.as_posix()}/", b"")
+
+        files: list[Path] = [
+            ca_dir / Path(*relative.parts)
+            for relative in REQUIRED_FILES
+        ]
+        config_path = ca_dir / "openssl.cnf"
+        if config_path.is_file():
+            files.append(config_path)
+        for directory_name in ("newcerts", "crl"):
+            directory = ca_dir / directory_name
+            for path in sorted(directory.rglob("*")):
+                if path.is_file():
+                    files.append(path)
+
+        for path in sorted(set(files)):
+            archive.write(path, path.relative_to(ca_dir).as_posix())
 
 
 def _parent_dirs(path: PurePosixPath) -> set[PurePosixPath]:
