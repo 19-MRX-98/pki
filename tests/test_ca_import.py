@@ -29,6 +29,42 @@ def load_import_modules(tmp_path, monkeypatch):
     return pki_ca_import, pki_storage, pki_paths
 
 
+def load_app_modules(tmp_path, monkeypatch):
+    app_root = Path(__file__).resolve().parents[1]
+    monkeypatch.syspath_prepend(str(app_root))
+    import pki_paths
+
+    monkeypatch.setattr(pki_paths, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(pki_paths, "CA_ROOT", tmp_path / "data" / "ca")
+    monkeypatch.setattr(pki_paths, "ISSUED_ROOT", tmp_path / "data" / "issued")
+
+    for name in [
+        "app",
+        "pki_auth",
+        "pki_ca",
+        "pki_ca_import",
+        "pki_certificates",
+        "pki_enrollment",
+        "pki_storage",
+    ]:
+        sys.modules.pop(name, None)
+
+    import app
+    import pki_auth
+    import pki_paths as reloaded_paths
+    import pki_storage
+
+    return app, pki_auth, pki_storage, reloaded_paths
+
+
+def login_test_client(app_module):
+    client = app_module.app.test_client()
+    with client.session_transaction() as sess:
+        sess["user_id"] = 1
+        sess["username"] = "admin"
+    return client
+
+
 def make_zip(entries: dict[str, bytes | str]) -> io.BytesIO:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -163,6 +199,71 @@ def test_import_rejects_corrupt_zip_member(tmp_path, monkeypatch):
 
     with pytest.raises(pki_ca_import.CaImportError, match="ungueltige ZIP-Datei"):
         pki_ca_import.import_ca_zip(archive, "imported-ca")
+
+
+def test_ca_import_route_uploads_zip_and_redirects_to_imported_ca(tmp_path, monkeypatch):
+    app_module, pki_auth, _pki_storage, pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    source = tmp_path / "backup"
+    create_openssl_ca(source, "Route Imported CA")
+    client = login_test_client(app_module)
+
+    response = client.post(
+        "/ca/import",
+        data={
+            "ca_import_slug": "route-imported-ca",
+            "ca_import_file": (zip_directory(source), "ca-backup.zip"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/cas?ca=route-imported-ca")
+    ca_dir = pki_paths.CA_ROOT / "route-imported-ca"
+    assert (ca_dir / "certs" / "ca.crt").exists()
+    assert (ca_dir / "private" / "ca.key").exists()
+
+
+def test_ca_import_route_duplicate_slug_flashes_and_preserves_existing_ca(
+    tmp_path, monkeypatch
+):
+    app_module, pki_auth, _pki_storage, pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    existing_cert = pki_paths.CA_ROOT / "existing-ca" / "certs" / "ca.crt"
+    existing_cert.parent.mkdir(parents=True)
+    existing_cert.write_text("original cert\n", encoding="utf-8")
+    source = tmp_path / "backup"
+    create_openssl_ca(source, "Duplicate Import CA")
+    client = login_test_client(app_module)
+
+    response = client.post(
+        "/ca/import",
+        data={
+            "ca_import_slug": "existing-ca",
+            "ca_import_file": (zip_directory(source), "ca-backup.zip"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Ziel-Slug existiert bereits" in response.get_data(as_text=True)
+    assert existing_cert.read_text(encoding="utf-8") == "original cert\n"
+
+
+def test_ca_import_route_missing_file_flashes_message(tmp_path, monkeypatch):
+    app_module, pki_auth, _pki_storage, _pki_paths = load_app_modules(tmp_path, monkeypatch)
+    pki_auth.ensure_db()
+    client = login_test_client(app_module)
+
+    response = client.post(
+        "/ca/import",
+        data={"ca_import_slug": "missing-file"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Bitte ein CA-Backup-ZIP auswählen." in response.get_data(as_text=True)
 
 
 def run(cmd: list[str]) -> None:

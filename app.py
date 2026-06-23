@@ -19,6 +19,7 @@ from pki_auth import (
     verify_user,
 )
 from pki_ca import ca_crl_path, ca_exists, create_ca, generate_crl
+from pki_ca_import import CaImportError, import_ca_zip
 from pki_certificates import (
     certificate_enddate_iso,
     csr_sans,
@@ -736,6 +737,28 @@ def create_ca_route():
     except subprocess.CalledProcessError:
         flash("CRL konnte nicht erzeugt werden.", "error")
     return redirect(url_for("cas_page", ca=final_slug))
+
+
+@app.route("/ca/import", methods=["POST"])
+def import_ca_route():
+    prepare_storage()
+    uploaded_file = request.files.get("ca_import_file")
+    requested_slug = request.form.get("ca_import_slug", "").strip()
+    if not uploaded_file or not uploaded_file.filename:
+        flash("Bitte ein CA-Backup-ZIP auswählen.", "error")
+        return redirect(url_for("cas_page"))
+
+    try:
+        imported_slug = import_ca_zip(uploaded_file, requested_slug or None)
+    except CaImportError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("cas_page"))
+    except OSError as exc:
+        flash(f"CA-Backup konnte nicht geschrieben werden: {exc}", "error")
+        return redirect(url_for("cas_page"))
+
+    flash("CA-Backup erfolgreich importiert.", "success")
+    return redirect(url_for("cas_page", ca=imported_slug))
 
 
 @app.route("/cert", methods=["POST"])
