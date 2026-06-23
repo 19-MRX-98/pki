@@ -1,6 +1,7 @@
 __pycache__/
 .venv/
 .worktrees/
+.dev-rebuild.stamp
 *.pyc
 *.pyo
 *.pyd
